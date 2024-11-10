@@ -483,8 +483,6 @@ static void pcim_disable_device(void *pdev_raw)
 
 	if (!pdev->pinned)
 		pci_disable_device(pdev);
-
-	pdev->is_managed = false;
 }
 
 /**

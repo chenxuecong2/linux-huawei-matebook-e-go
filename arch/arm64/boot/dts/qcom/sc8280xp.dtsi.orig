@@ -12,6 +12,7 @@
 #include <dt-bindings/clock/qcom,sc8280xp-lpasscc.h>
 #include <dt-bindings/clock/qcom,sm8350-videocc.h>
 #include <dt-bindings/interconnect/qcom,osm-l3.h>
+#include <dt-bindings/interconnect/qcom,icc.h>
 #include <dt-bindings/interconnect/qcom,sc8280xp.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/mailbox/qcom-ipcc.h>
@@ -706,6 +707,11 @@
 			no-map;
 		};
 
+		pil_slpi_mem: slpi-region@88c00000 {
+			reg = <0 0x88c00000 0 0x1500000>;
+			no-map;
+		};		
+
 		pil_nsp0_mem: cdsp0-region@8a100000 {
 			reg = <0 0x8a100000 0 0x1e00000>;
 			no-map;
@@ -745,6 +751,30 @@
 			#interrupt-cells = <2>;
 		};
 	};
+
+	smp2p-slpi {
+		compatible = "qcom,smp2p";
+		qcom,smem = <481>, <430>;
+		interrupts-extended = <&ipcc IPCC_CLIENT_SLPI
+					     IPCC_MPROC_SIGNAL_SMP2P
+					     IRQ_TYPE_EDGE_RISING>;
+		mboxes = <&ipcc IPCC_CLIENT_SLPI
+				IPCC_MPROC_SIGNAL_SMP2P>;
+
+		qcom,local-pid = <0>;
+		qcom,remote-pid = <3>;
+
+		smp2p_slpi_out: master-kernel {
+			qcom,entry-name = "master-kernel";
+			#qcom,smem-state-cells = <1>;
+		};
+
+		smp2p_slpi_in: slave-kernel {
+			qcom,entry-name = "slave-kernel";
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
+	};	
 
 	smp2p-nsp0 {
 		compatible = "qcom,smp2p";
@@ -2634,6 +2664,12 @@
 			status = "disabled";
 		};
 
+		refgen: regulator@88e6000 {
+			compatible = "qcom,sc8280xp-refgen-regulator",
+				     "qcom,sm8250-refgen-regulator";
+			reg = <0x0 0x088e6000 0x0 0x84>;
+		};
+
 		usb_2_hsphy0: phy@88e7000 {
 			compatible = "qcom,sc8280xp-usb-hs-phy",
 				     "qcom,usb-snps-hs-5nm-phy";
@@ -2811,6 +2847,73 @@
 				};
 			};
 		};
+
+		remoteproc_slpi: remoteproc@2400000 { /* FIXME */
+			compatible = "qcom,sc8280xp-slpi-pas";
+			reg = <0 0x02400000 0 0x4000>;
+
+			interrupts-extended = <&pdc 9 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_slpi_in 0 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_slpi_in 1 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_slpi_in 2 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_slpi_in 3 IRQ_TYPE_EDGE_RISING>;
+			interrupt-names = "wdog", "fatal", "ready",
+					  "handover", "stop-ack";
+
+			clocks = <&rpmhcc RPMH_CXO_CLK>;
+			clock-names = "xo";
+
+			power-domains = <&rpmhpd SC8280XP_LCX>,
+							<&rpmhpd SC8280XP_LMX>;
+			power-domain-names = "lcx", "lmx";
+
+			memory-region = <&pil_slpi_mem>;
+
+			qcom,qmp = <&aoss_qmp>;
+
+			qcom,smem-states = <&smp2p_slpi_out 0>;
+			qcom,smem-state-names = "stop";
+
+			status = "disabled";
+
+			glink-edge {
+				interrupts-extended = <&ipcc IPCC_CLIENT_SLPI
+							     IPCC_MPROC_SIGNAL_GLINK_QMP
+							     IRQ_TYPE_EDGE_RISING>;
+				mboxes = <&ipcc IPCC_CLIENT_SLPI
+						IPCC_MPROC_SIGNAL_GLINK_QMP>;
+
+				label = "slpi";
+				qcom,remote-pid = <3>;
+
+				fastrpc {
+					compatible = "qcom,fastrpc";
+					qcom,glink-channels = "fastrpcglink-apps-dsp";
+					label = "sdsp";
+					qcom,non-secure-domain;
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					compute-cb@1 {
+						compatible = "qcom,fastrpc-compute-cb";
+						reg = <1>;
+					//	iommus = <&apps_smmu 0x0541 0x0>;
+					};
+
+					compute-cb@2 {
+						compatible = "qcom,fastrpc-compute-cb";
+						reg = <2>;
+					//	iommus = <&apps_smmu 0x0542 0x0>;
+					};
+
+					compute-cb@3 {
+						compatible = "qcom,fastrpc-compute-cb";
+						reg = <3>;
+					//	iommus = <&apps_smmu 0x0543 0x0>;
+					};
+				};
+			};
+		};		
 
 		rxmacro: rxmacro@3200000 {
 			compatible = "qcom,sc8280xp-lpass-rx-macro";
@@ -3973,26 +4076,26 @@
 				    "vfe3",
 				    "csid3";
 
-			interrupts = <GIC_SPI 359 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 360 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 448 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 464 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 465 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 466 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 467 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 468 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 469 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 477 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 478 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 479 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 640 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 641 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 758 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 759 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 760 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 761 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 762 IRQ_TYPE_EDGE_RISING>,
-				     <GIC_SPI 764 IRQ_TYPE_EDGE_RISING>;
+			interrupts = <GIC_SPI 359 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 360 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 448 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 464 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 465 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 466 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 467 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 468 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 469 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 477 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 478 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 479 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 640 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 641 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 758 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 759 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 760 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 761 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 762 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 764 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "csid1_lite",
 					  "vfe_lite1",
 					  "csiphy3",
@@ -4191,8 +4294,12 @@
 				      "core";
 			interrupts = <GIC_SPI 83 IRQ_TYPE_LEVEL_HIGH>;
 			interconnects = <&mmss_noc MASTER_MDP0 0 &mc_virt SLAVE_EBI1 0>,
-					<&mmss_noc MASTER_MDP1 0 &mc_virt SLAVE_EBI1 0>;
-			interconnect-names = "mdp0-mem", "mdp1-mem";
+					<&mmss_noc MASTER_MDP1 0 &mc_virt SLAVE_EBI1 0>,
+					<&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+					 &config_noc SLAVE_DISPLAY_CFG QCOM_ICC_TAG_ACTIVE_ONLY>;
+			interconnect-names = "mdp0-mem",
+					     "mdp1-mem",
+					     "cpu-cfg";
 			iommus = <&apps_smmu 0x1000 0x402>;
 			power-domains = <&dispcc0 MDSS_GDSC>;
 			resets = <&dispcc0 DISP_CC_MDSS_CORE_BCR>;
@@ -4402,6 +4509,7 @@
 
 				operating-points-v2 = <&mdss0_dp1_opp_table>;
 				power-domains = <&rpmhpd SC8280XP_MMCX>;
+				refgen-supply = <&refgen>;
 
 				status = "disabled";
 
@@ -4471,6 +4579,7 @@
 				phys = <&mdss0_dp2_phy>;
 				phy-names = "dp";
 				power-domains = <&rpmhpd SC8280XP_MMCX>;
+				refgen-supply = <&refgen>;
 
 				assigned-clocks = <&dispcc0 DISP_CC_MDSS_DPTX2_LINK_CLK_SRC>,
 						  <&dispcc0 DISP_CC_MDSS_DPTX2_PIXEL0_CLK_SRC>;
@@ -4964,6 +5073,22 @@
 			};
 		};
 
+		pcie_smmu: iommu@14f80000 {
+			compatible = "qcom,sc8280xp-smmu-v3", "arm,smmu-v3";
+			reg = <0 0x14f80000 0 0x80000>;
+			interrupts = <GIC_SPI 951 IRQ_TYPE_EDGE_RISING>,
+				     <GIC_SPI 955 IRQ_TYPE_EDGE_RISING>,
+				     <GIC_SPI 953 IRQ_TYPE_EDGE_RISING>;
+			interrupt-names = "eventq",
+					  "gerror",
+					  "cmdq-sync";
+			#iommu-cells = <1>;
+			dma-coherent;
+
+			/* The hypervisor prevents register access from Linux */
+			status = "reserved";
+		};
+
 		apps_smmu: iommu@15000000 {
 			compatible = "qcom,sc8280xp-smmu-500", "arm,mmu-500";
 			reg = <0 0x15000000 0 0x100000>;
@@ -5099,7 +5224,6 @@
 				     <GIC_SPI 892 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 891 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 890 IRQ_TYPE_LEVEL_HIGH>;
-			dma-coherent;
 		};
 
 		intc: interrupt-controller@17a00000 {
@@ -5424,28 +5548,6 @@
 					};
 				};
 			};
-		};
-
-		cryptobam: dma-controller@1dc4000 {
-			compatible = "qcom,bam-v1.7.4", "qcom,bam-v1.7.0";
-			reg = <0x0 0x01dc4000 0x0 0x28000>;
-			interrupts = <GIC_SPI 274 IRQ_TYPE_LEVEL_HIGH>;
-			#dma-cells = <1>;
-			qcom,ee = <0>;
-			qcom,controlled-remotely;
-			iommus = <&apps_smmu 0x584 0x0>,
-				 <&apps_smmu 0x585 0x0>;
-		};
-
-		crypto: crypto@1dfa000 {
-			compatible = "qcom,sc8280xp-qce", "qcom,sm8150-qce", "qcom,qce";
-			reg = <0x0 0x01dfa000 0x0 0x6000>;
-			dmas = <&cryptobam 4>, <&cryptobam 5>;
-			dma-names = "rx", "tx";
-			iommus = <&apps_smmu 0x584 0x0>,
-				 <&apps_smmu 0x585 0x0>;
-			interconnects = <&aggre2_noc MASTER_CRYPTO 0 &mc_virt SLAVE_EBI1 0>;
-			interconnect-names = "memory";
 		};
 
 		remoteproc_nsp1: remoteproc@21300000 {
@@ -5840,6 +5942,7 @@
 				phys = <&mdss1_dp3_phy>;
 				phy-names = "dp";
 				power-domains = <&rpmhpd SC8280XP_MMCX>;
+				refgen-supply = <&refgen>;
 
 				assigned-clocks = <&dispcc1 DISP_CC_MDSS_DPTX3_LINK_CLK_SRC>,
 						  <&dispcc1 DISP_CC_MDSS_DPTX3_PIXEL0_CLK_SRC>;

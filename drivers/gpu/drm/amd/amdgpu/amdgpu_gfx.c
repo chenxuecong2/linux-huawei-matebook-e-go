@@ -657,7 +657,7 @@ int amdgpu_gfx_enable_kcq(struct amdgpu_device *adev, int xcc_id)
 	uint64_t queue_mask = 0;
 	int r, i, j;
 
-	if (adev->mes.enable_legacy_queue_map)
+	if (adev->enable_mes)
 		return amdgpu_gfx_mes_enable_kcq(adev, xcc_id);
 
 	if (!kiq->pmf || !kiq->pmf->kiq_map_queues || !kiq->pmf->kiq_set_resources)
@@ -719,7 +719,7 @@ int amdgpu_gfx_enable_kgq(struct amdgpu_device *adev, int xcc_id)
 
 	amdgpu_device_flush_hdp(adev, NULL);
 
-	if (adev->mes.enable_legacy_queue_map) {
+	if (adev->enable_mes) {
 		for (i = 0; i < adev->gfx.num_gfx_rings; i++) {
 			j = i + xcc_id * adev->gfx.num_gfx_rings;
 			r = amdgpu_mes_map_legacy_queue(adev,

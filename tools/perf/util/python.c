@@ -20,7 +20,6 @@
 #include "util/env.h"
 #include "util/kvm-stat.h"
 #include "util/kwork.h"
-#include "util/sample.h"
 #include "util/lock-contention.h"
 #include <internal/lib.h>
 #include "../builtin.h"

@@ -78,9 +78,6 @@ properties:
     description: GPIO controlled connection to WAKE# signal
     maxItems: 1
 
-  vddpe-3v3-supply:
-    description: PCIe endpoint power supply
-
 required:
   - reg
   - reg-names

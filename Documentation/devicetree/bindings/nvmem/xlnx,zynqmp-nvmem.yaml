@@ -28,7 +28,7 @@ unevaluatedProperties: false
 
 examples:
   - |
-    soc-nvmem {
+    nvmem {
         compatible = "xlnx,zynqmp-nvmem-fw";
         nvmem-layout {
             compatible = "fixed-layout";

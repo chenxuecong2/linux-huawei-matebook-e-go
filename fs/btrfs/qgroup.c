@@ -4346,9 +4346,10 @@ static int __btrfs_qgroup_release_data(struct btrfs_inode *inode,
 	int ret;
 
 	if (btrfs_qgroup_mode(inode->root->fs_info) == BTRFS_QGROUP_MODE_DISABLED) {
+		extent_changeset_init(&changeset);
 		return clear_record_extent_bits(&inode->io_tree, start,
 						start + len - 1,
-						EXTENT_QGROUP_RESERVED, NULL);
+						EXTENT_QGROUP_RESERVED, &changeset);
 	}
 
 	/* In release case, we shouldn't have @reserved */

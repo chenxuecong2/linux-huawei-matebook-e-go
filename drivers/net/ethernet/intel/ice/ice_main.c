@@ -608,15 +608,11 @@ ice_prepare_for_reset(struct ice_pf *pf, enum ice_reset_req reset_type)
 			memset(&vsi->mqprio_qopt, 0, sizeof(vsi->mqprio_qopt));
 		}
 	}
-
-	if (vsi->netdev)
-		netif_device_detach(vsi->netdev);
 skip:
 
 	/* clear SW filtering DB */
 	ice_clear_hw_tbls(hw);
 	/* disable the VSIs and their queues that are not already DOWN */
-	set_bit(ICE_VSI_REBUILD_PENDING, ice_get_main_vsi(pf)->state);
 	ice_pf_dis_all_vsi(pf, false);
 
 	if (test_bit(ICE_FLAG_PTP_SUPPORTED, pf->flags))
@@ -3005,8 +3001,8 @@ ice_xdp_setup_prog(struct ice_vsi *vsi, struct bpf_prog *prog,
 		   struct netlink_ext_ack *extack)
 {
 	unsigned int frame_size = vsi->netdev->mtu + ICE_ETH_PKT_HDR_PAD;
+	bool if_running = netif_running(vsi->netdev);
 	int ret = 0, xdp_ring_err = 0;
-	bool if_running;
 
 	if (prog && !prog->aux->xdp_has_frags) {
 		if (frame_size > ice_max_xdp_frame_size(vsi)) {
@@ -3017,17 +3013,13 @@ ice_xdp_setup_prog(struct ice_vsi *vsi, struct bpf_prog *prog,
 	}
 
 	/* hot swap progs and avoid toggling link */
-	if (ice_is_xdp_ena_vsi(vsi) == !!prog ||
-	    test_bit(ICE_VSI_REBUILD_PENDING, vsi->state)) {
+	if (ice_is_xdp_ena_vsi(vsi) == !!prog) {
 		ice_vsi_assign_bpf_prog(vsi, prog);
 		return 0;
 	}
 
-	if_running = netif_running(vsi->netdev) &&
-		     !test_and_set_bit(ICE_VSI_DOWN, vsi->state);
-
 	/* need to stop netdev while setting up the program for Rx rings */
-	if (if_running) {
+	if (if_running && !test_and_set_bit(ICE_VSI_DOWN, vsi->state)) {
 		ret = ice_down(vsi);
 		if (ret) {
 			NL_SET_ERR_MSG_MOD(extack, "Preparing device for XDP attach failed");
@@ -3093,28 +3085,21 @@ static int ice_xdp(struct net_device *dev, struct netdev_bpf *xdp)
 {
 	struct ice_netdev_priv *np = netdev_priv(dev);
 	struct ice_vsi *vsi = np->vsi;
-	int ret;
 
 	if (vsi->type != ICE_VSI_PF) {
 		NL_SET_ERR_MSG_MOD(xdp->extack, "XDP can be loaded only on PF VSI");
 		return -EINVAL;
 	}
 
-	mutex_lock(&vsi->xdp_state_lock);
-
 	switch (xdp->command) {
 	case XDP_SETUP_PROG:
-		ret = ice_xdp_setup_prog(vsi, xdp->prog, xdp->extack);
-		break;
+		return ice_xdp_setup_prog(vsi, xdp->prog, xdp->extack);
 	case XDP_SETUP_XSK_POOL:
-		ret = ice_xsk_pool_setup(vsi, xdp->xsk.pool, xdp->xsk.queue_id);
-		break;
+		return ice_xsk_pool_setup(vsi, xdp->xsk.pool,
+					  xdp->xsk.queue_id);
 	default:
-		ret = -EINVAL;
+		return -EINVAL;
 	}
-
-	mutex_unlock(&vsi->xdp_state_lock);
-	return ret;
 }
 
 /**
@@ -3570,9 +3555,11 @@ static void ice_napi_add(struct ice_vsi *vsi)
 	if (!vsi->netdev)
 		return;
 
-	ice_for_each_q_vector(vsi, v_idx)
+	ice_for_each_q_vector(vsi, v_idx) {
 		netif_napi_add(vsi->netdev, &vsi->q_vectors[v_idx]->napi,
 			       ice_napi_poll);
+		__ice_q_vector_set_napi_queues(vsi->q_vectors[v_idx], false);
+	}
 }
 
 /**
@@ -5363,6 +5350,7 @@ err_load:
 	ice_deinit(pf);
 err_init:
 	ice_adapter_put(pdev);
+	pci_disable_device(pdev);
 	return err;
 }
 
@@ -5469,6 +5457,7 @@ static void ice_remove(struct pci_dev *pdev)
 	ice_set_wake(pf);
 
 	ice_adapter_put(pdev);
+	pci_disable_device(pdev);
 }
 
 /**
@@ -5548,9 +5537,7 @@ static int ice_reinit_interrupt_scheme(struct ice_pf *pf)
 		if (ret)
 			goto err_reinit;
 		ice_vsi_map_rings_to_vectors(pf->vsi[v]);
-		rtnl_lock();
 		ice_vsi_set_napi_queues(pf->vsi[v]);
-		rtnl_unlock();
 	}
 
 	ret = ice_req_irq_msix_misc(pf);
@@ -5564,12 +5551,8 @@ static int ice_reinit_interrupt_scheme(struct ice_pf *pf)
 
 err_reinit:
 	while (v--)
-		if (pf->vsi[v]) {
-			rtnl_lock();
-			ice_vsi_clear_napi_queues(pf->vsi[v]);
-			rtnl_unlock();
+		if (pf->vsi[v])
 			ice_vsi_free_q_vectors(pf->vsi[v]);
-		}
 
 	return ret;
 }
@@ -5634,9 +5617,6 @@ static int ice_suspend(struct device *dev)
 	ice_for_each_vsi(pf, v) {
 		if (!pf->vsi[v])
 			continue;
-		rtnl_lock();
-		ice_vsi_clear_napi_queues(pf->vsi[v]);
-		rtnl_unlock();
 		ice_vsi_free_q_vectors(pf->vsi[v]);
 	}
 	ice_clear_interrupt_scheme(pf);
@@ -7250,7 +7230,7 @@ int ice_down(struct ice_vsi *vsi)
 	if (tx_err)
 		netdev_err(vsi->netdev, "Failed stop Tx rings, VSI %d error %d\n",
 			   vsi->vsi_num, tx_err);
-	if (!tx_err && vsi->xdp_rings) {
+	if (!tx_err && ice_is_xdp_ena_vsi(vsi)) {
 		tx_err = ice_vsi_stop_xdp_tx_rings(vsi);
 		if (tx_err)
 			netdev_err(vsi->netdev, "Failed stop XDP rings, VSI %d error %d\n",
@@ -7267,7 +7247,7 @@ int ice_down(struct ice_vsi *vsi)
 	ice_for_each_txq(vsi, i)
 		ice_clean_tx_ring(vsi->tx_rings[i]);
 
-	if (vsi->xdp_rings)
+	if (ice_is_xdp_ena_vsi(vsi))
 		ice_for_each_xdp_txq(vsi, i)
 			ice_clean_tx_ring(vsi->xdp_rings[i]);
 
@@ -7472,8 +7452,6 @@ int ice_vsi_open(struct ice_vsi *vsi)
 		err = netif_set_real_num_rx_queues(vsi->netdev, vsi->num_rxq);
 		if (err)
 			goto err_set_qs;
-
-		ice_vsi_set_napi_queues(vsi);
 	}
 
 	err = ice_up_complete(vsi);
@@ -7611,7 +7589,6 @@ static void ice_update_pf_netdev_link(struct ice_pf *pf)
  */
 static void ice_rebuild(struct ice_pf *pf, enum ice_reset_req reset_type)
 {
-	struct ice_vsi *vsi = ice_get_main_vsi(pf);
 	struct device *dev = ice_pf_to_dev(pf);
 	struct ice_hw *hw = &pf->hw;
 	bool dvm;
@@ -7753,9 +7730,6 @@ static void ice_rebuild(struct ice_pf *pf, enum ice_reset_req reset_type)
 
 		ice_rebuild_arfs(pf);
 	}
-
-	if (vsi && vsi->netdev)
-		netif_device_attach(vsi->netdev);
 
 	ice_update_pf_netdev_link(pf);
 

@@ -77,7 +77,6 @@ u8 *ec_command_data(struct gaokun_ec *ec, u8 mcmd, u8 scmd, u8 ilen, const u8 *b
 				dev_err(&ec->client->dev, "I2C EC write failed with error code: %d\n", ret);
 				goto err;
 			}
-			break;
 		default:
 			// ACPI allow this, so we don't goto err.
 			dev_warn(&ec->client->dev, "Unsupported input data buffer length: %d\n", ilen);
@@ -91,13 +90,7 @@ u8 *ec_command_data(struct gaokun_ec *ec, u8 mcmd, u8 scmd, u8 ilen, const u8 *b
 		case 7: case 8: case 0xF: case 0x16: case 0x20:
 		case 0x23: case 0x40: case 0xFE: case 0xFF: case 0x9:
 			ret = i2c_smbus_read_i2c_block_data(ec->client, mcmd, olen, obuf);
-			if (ret < 0) {
-				dev_err(&ec->client->dev, "I2C EC read failed with error code: %d\n", ret);
-				goto err;
-			}else{
-				dev_info(&ec->client->dev, "I2C EC read successful, data: %*ph\n", olen, obuf);
-			}
-			break;
+		break;
 		default:
 			dev_warn(&ec->client->dev, "Unsupported output data buffer length: %d\n", olen);
 	}

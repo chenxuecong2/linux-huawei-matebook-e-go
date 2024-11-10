@@ -3092,7 +3092,7 @@ int panthor_group_create(struct panthor_file *pfile,
 	if (group_args->pad)
 		return -EINVAL;
 
-	if (group_args->priority >= PANTHOR_CSG_PRIORITY_COUNT)
+	if (group_args->priority > PANTHOR_CSG_PRIORITY_HIGH)
 		return -EINVAL;
 
 	if ((group_args->compute_core_mask & ~ptdev->gpu_info.shader_present) ||

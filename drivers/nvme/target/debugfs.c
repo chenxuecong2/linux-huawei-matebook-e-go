@@ -13,7 +13,7 @@
 #include "nvmet.h"
 #include "debugfs.h"
 
-static struct dentry *nvmet_debugfs;
+struct dentry *nvmet_debugfs;
 
 #define NVMET_DEBUGFS_ATTR(field) \
 	static int field##_open(struct inode *inode, struct file *file) \

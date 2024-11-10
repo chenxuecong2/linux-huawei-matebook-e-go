@@ -1,0 +1,4 @@
+0x00000000	usb_data	/home/cxc/linux-ego/gaokun-ec-dkms/gaokun-ec	EXPORT_SYMBOL_GPL	
+0x00000000	ec_command_data	/home/cxc/linux-ego/gaokun-ec-dkms/gaokun-ec	EXPORT_SYMBOL_GPL	
+0x00000000	gaokun_ec_register_notify	/home/cxc/linux-ego/gaokun-ec-dkms/gaokun-ec	EXPORT_SYMBOL_GPL	
+0x00000000	gaokun_ec_unregister_notify	/home/cxc/linux-ego/gaokun-ec-dkms/gaokun-ec	EXPORT_SYMBOL_GPL	

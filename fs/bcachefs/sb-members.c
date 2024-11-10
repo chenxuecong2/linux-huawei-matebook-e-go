@@ -11,8 +11,7 @@
 
 void bch2_dev_missing(struct bch_fs *c, unsigned dev)
 {
-	if (dev != BCH_SB_MEMBER_INVALID)
-		bch2_fs_inconsistent(c, "pointer to nonexistent device %u", dev);
+	bch2_fs_inconsistent(c, "pointer to nonexistent device %u", dev);
 }
 
 void bch2_dev_bucket_missing(struct bch_fs *c, struct bpos bucket)

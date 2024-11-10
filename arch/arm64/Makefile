@@ -186,13 +186,6 @@ $(BOOT_TARGETS): vmlinux
 Image.%: Image
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
-ifeq ($(CONFIG_COMPRESSED_INSTALL),y)
- DEFAULT_KBUILD_IMAGE = $(KBUILD_IMAGE)
-else
- DEFAULT_KBUILD_IMAGE = $(boot)/Image
-endif
-
-install: KBUILD_IMAGE := $(DEFAULT_KBUILD_IMAGE)
 install zinstall:
 	$(call cmd,install)
 

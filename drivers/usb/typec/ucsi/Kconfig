@@ -78,13 +78,4 @@ config UCSI_LENOVO_YOGA_C630
 	  To compile the driver as a module, choose M here: the module will be
 	  called ucsi_yoga_c630.
 
-config UCSI_HUAWEI_MATEBOOK_E_GO
-	tristate "UCSI Interface Driver for Lenovo Yoga C630"
-	depends on EC_LENOVO_YOGA_C630
-	help
-	  This driver enables UCSI support on the Lenovo Yoga C630 laptop.
-
-	  To compile the driver as a module, choose M here: the module will be
-	  called ucsi_yoga_c630.	  
-
 endif

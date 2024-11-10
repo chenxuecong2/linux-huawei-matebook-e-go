@@ -999,22 +999,6 @@ config BATTERY_UG3105
 	  device is off or suspended, the functionality of this driver is
 	  limited to reporting capacity only.
 
-config GAOKUN_BATTERY
-	tristate "uPI uG3105 battery monitor driver"
-	depends on I2C
-	help
-	  Battery monitor driver for the uPI uG3105 battery monitor.
-
-	  Note the uG3105 is not a full-featured autonomous fuel-gauge. Instead
-	  it is expected to be use in combination with some always on
-	  microcontroller reading its coulomb-counter before it can wrap
-	  (it must be read every 400 seconds!).
-
-	  Since Linux does not monitor coulomb-counter changes while the
-	  device is off or suspended, the functionality of this driver is
-	  limited to reporting capacity only.
-
-
 config CHARGER_QCOM_SMB2
 	tristate "Qualcomm PMI8998 PMIC charger driver"
 	depends on MFD_SPMI_PMIC

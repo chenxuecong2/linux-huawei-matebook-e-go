@@ -80,12 +80,10 @@ static __always_inline bool context_tracking_guest_enter(void)
 	return context_tracking_enabled_this_cpu();
 }
 
-static __always_inline bool context_tracking_guest_exit(void)
+static __always_inline void context_tracking_guest_exit(void)
 {
 	if (context_tracking_enabled())
 		__ct_user_exit(CONTEXT_GUEST);
-
-	return context_tracking_enabled_this_cpu();
 }
 
 #define CT_WARN_ON(cond) WARN_ON(context_tracking_enabled() && (cond))
@@ -100,7 +98,7 @@ static inline void exception_exit(enum ctx_state prev_ctx) { }
 static inline int ct_state(void) { return -1; }
 static inline int __ct_state(void) { return -1; }
 static __always_inline bool context_tracking_guest_enter(void) { return false; }
-static __always_inline bool context_tracking_guest_exit(void) { return false; }
+static __always_inline void context_tracking_guest_exit(void) { }
 #define CT_WARN_ON(cond) do { } while (0)
 #endif /* !CONFIG_CONTEXT_TRACKING_USER */
 

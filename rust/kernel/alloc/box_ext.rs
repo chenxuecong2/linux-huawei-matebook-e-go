@@ -21,10 +21,8 @@ pub trait BoxExt<T>: Sized {
 
 impl<T> BoxExt<T> for Box<T> {
     fn new(x: T, flags: Flags) -> Result<Self, AllocError> {
-        let mut b = <Self as BoxExt<_>>::new_uninit(flags)?;
-        b.write(x);
-        // SAFETY: We just wrote to it.
-        Ok(unsafe { b.assume_init() })
+        let b = <Self as BoxExt<_>>::new_uninit(flags)?;
+        Ok(Box::write(b, x))
     }
 
     #[cfg(any(test, testlib))]

@@ -1,0 +1,10 @@
+--- arch/arm64/boot/dts/qcom/sc8280xp.dtsi
++++ arch/arm64/boot/dts/qcom/sc8280xp.dtsi
+@@ -6016,7 +6007,6 @@ mdss1_dsi1: dsi@22096000 {
+ 
+ 				operating-points-v2 = <&mdss1_dsi1_opp_table>;
+ 				power-domains = <&rpmhpd SC8280XP_MMCX>;
+-				refgen-supply = <&refgen>;
+ 
+ 				phys = <&mdss1_dsi1_phy>;
+ 				phy-names = "dsi";

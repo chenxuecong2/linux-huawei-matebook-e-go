@@ -158,7 +158,6 @@ void __init riscv_init_cbo_blocksizes(void)
 #ifdef CONFIG_SMP
 static void set_icache_stale_mask(void)
 {
-	int cpu = get_cpu();
 	cpumask_t *mask;
 	bool stale_cpu;
 
@@ -169,11 +168,10 @@ static void set_icache_stale_mask(void)
 	 * concurrently on different harts.
 	 */
 	mask = &current->mm->context.icache_stale_mask;
-	stale_cpu = cpumask_test_cpu(cpu, mask);
+	stale_cpu = cpumask_test_cpu(smp_processor_id(), mask);
 
 	cpumask_setall(mask);
-	cpumask_assign_cpu(cpu, mask, stale_cpu);
-	put_cpu();
+	cpumask_assign_cpu(smp_processor_id(), mask, stale_cpu);
 }
 #endif
 
@@ -241,12 +239,14 @@ int riscv_set_icache_flush_ctx(unsigned long ctx, unsigned long scope)
 	case PR_RISCV_CTX_SW_FENCEI_OFF:
 		switch (scope) {
 		case PR_RISCV_SCOPE_PER_PROCESS:
-			set_icache_stale_mask();
 			current->mm->context.force_icache_flush = false;
+
+			set_icache_stale_mask();
 			break;
 		case PR_RISCV_SCOPE_PER_THREAD:
-			set_icache_stale_mask();
 			current->thread.force_icache_flush = false;
+
+			set_icache_stale_mask();
 			break;
 		default:
 			return -EINVAL;

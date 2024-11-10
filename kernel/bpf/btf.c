@@ -823,11 +823,9 @@ static bool btf_name_valid_section(const struct btf *btf, u32 offset)
 	const char *src = btf_str_by_offset(btf, offset);
 	const char *src_limit;
 
-	if (!*src)
-		return false;
-
 	/* set a limit on identifier length */
 	src_limit = src + KSYM_NAME_LEN;
+	src++;
 	while (*src && src < src_limit) {
 		if (!isprint(*src))
 			return false;
@@ -6285,7 +6283,7 @@ static struct btf *btf_parse_module(const char *module_name, const void *data,
 
 errout:
 	btf_verifier_env_free(env);
-	if (!IS_ERR(base_btf) && base_btf != vmlinux_btf)
+	if (base_btf != vmlinux_btf)
 		btf_free(base_btf);
 	if (btf) {
 		kvfree(btf->data);
