@@ -178,17 +178,6 @@
 		regulator-always-on;
 	};
 
-	vreg_s10b: regulator-s10b {
-		compatible = "regulator-fixed";
-
-		regulator-name = "VREG_S10B";
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <1800000>;
-
-		regulator-always-on;
-		regulator-boot-on;
-	};
-
 	vreg_wlan: regulator-wlan {
 		compatible = "regulator-fixed";
 
@@ -281,10 +270,13 @@
 
 		wlan-enable-gpios = <&tlmm 134 GPIO_ACTIVE_HIGH>;
 		bt-enable-gpios = <&tlmm 133 GPIO_ACTIVE_HIGH>;
+		swctrl-gpios = <&tlmm 132 GPIO_ACTIVE_HIGH>;
 
 		vddio-supply = <&vreg_s10b>;
 		vddaon-supply = <&vreg_s12b>;
 		vddpmu-supply = <&vreg_s12b>;
+		vddpmumx-supply = <&vreg_s12b>;
+		vddpmucx-supply = <&vreg_s12b>;
 		vddrfa0p95-supply = <&vreg_s12b>;
 		vddrfa1p3-supply = <&vreg_s11b>;
 		vddrfa1p9-supply = <&vreg_s1c>;
@@ -341,6 +333,15 @@
 		qcom,pmic-id = "b";
 
 		vdd-l3-l5-supply = <&vreg_s11b>;
+
+		vreg_s10b: smps10 {
+			regulator-name = "vreg_s10b";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
+			regulator-boot-on;
+		};
 
 		vreg_s11b: smps11 {
 			regulator-name = "vreg_s11b";
@@ -663,6 +664,15 @@
 	status = "okay";
 };
 
+&pcie4_port0 {
+	wifi@0 {
+		compatible = "pci17cb,1103";
+		reg = <0x10000 0x0 0x0 0x0 0x0>;
+
+		qcom,ath11k-calibration-variant = "LE_X13S";
+	};
+};
+
 &pcie4_phy {
 	vdda-phy-supply = <&vreg_l6d>;
 	vdda-pll-supply = <&vreg_l4d>;
@@ -768,7 +778,6 @@
 		vddrfa1p8-supply = <&vreg_pmu_rfa_1p7>;
 	};
 };
-
 
 &uart17 {
 	compatible = "qcom,geni-debug-uart";
@@ -961,12 +970,6 @@
 			function = "gpio";
 			bias-disable;
 		};
-	};
-
-	wlan_en: wlan-en-state {
-		pins = "gpio134";
-		function = "gpio";
-		bias-pull-down;
 	};
 
 	nvme_reg_en: nvme-reg-en-state {
@@ -1197,5 +1200,12 @@
 			drive-strength = <16>;
 			output-high;
 		};
+	};
+
+	wlan_en: wlan-en-state {
+		pins = "gpio134";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
 	};
 };

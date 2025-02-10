@@ -3817,9 +3817,10 @@ struct wmi_stop_scan_cmd {
 };
 
 struct scan_chan_list_params {
+	struct list_head list;
 	u32 pdev_id;
 	u16 nallchans;
-	struct channel_param ch_param[];
+	struct channel_param ch_param[] __counted_by(nallchans);
 };
 
 struct wmi_scan_chan_list_cmd {

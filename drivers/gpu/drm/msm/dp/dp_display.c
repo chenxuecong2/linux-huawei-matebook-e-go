@@ -107,6 +107,8 @@ struct dp_display_private {
 	struct dp_event event_list[DP_EVENT_Q_MAX];
 	spinlock_t event_lock;
 
+	u8 lttpr_caps[DP_LTTPR_COMMON_CAP_SIZE];
+
 	bool wide_bus_supported;
 
 	struct dp_audio *audio;
@@ -119,7 +121,7 @@ struct msm_dp_desc {
 };
 
 static const struct msm_dp_desc sc7180_dp_descs[] = {
-	{ .io_start = 0x0ae90000, .id = MSM_DP_CONTROLLER_0 },
+	{ .io_start = 0x0ae90000, .id = MSM_DP_CONTROLLER_0, .wide_bus_supported = true },
 	{}
 };
 
@@ -130,9 +132,9 @@ static const struct msm_dp_desc sc7280_dp_descs[] = {
 };
 
 static const struct msm_dp_desc sc8180x_dp_descs[] = {
-	{ .io_start = 0x0ae90000, .id = MSM_DP_CONTROLLER_0 },
-	{ .io_start = 0x0ae98000, .id = MSM_DP_CONTROLLER_1 },
-	{ .io_start = 0x0ae9a000, .id = MSM_DP_CONTROLLER_2 },
+	{ .io_start = 0x0ae90000, .id = MSM_DP_CONTROLLER_0, .wide_bus_supported = true },
+	{ .io_start = 0x0ae98000, .id = MSM_DP_CONTROLLER_1, .wide_bus_supported = true },
+	{ .io_start = 0x0ae9a000, .id = MSM_DP_CONTROLLER_2, .wide_bus_supported = true },
 	{}
 };
 
@@ -149,7 +151,7 @@ static const struct msm_dp_desc sc8280xp_dp_descs[] = {
 };
 
 static const struct msm_dp_desc sm8650_dp_descs[] = {
-	{ .io_start = 0x0af54000, .id = MSM_DP_CONTROLLER_0 },
+	{ .io_start = 0x0af54000, .id = MSM_DP_CONTROLLER_0, .wide_bus_supported = true },
 	{}
 };
 
@@ -358,11 +360,34 @@ static int dp_display_send_hpd_notification(struct dp_display_private *dp,
 	return 0;
 }
 
+static void dp_display_lttpr_init(struct dp_display_private *dp)
+{
+	int lttpr_count;
+
+	if (drm_dp_read_lttpr_common_caps(dp->aux, dp->panel->dpcd,
+					  dp->lttpr_caps))
+		return;
+
+	lttpr_count = drm_dp_lttpr_count(dp->lttpr_caps);
+
+	if (lttpr_count) {
+		drm_dp_lttpr_set_transparent_mode(dp->aux, true);
+
+		if (lttpr_count > 0) {
+			if (drm_dp_lttpr_set_transparent_mode(dp->aux, false) != 1)
+				drm_dp_lttpr_set_transparent_mode(dp->aux, true);
+		}
+	}
+}
+
 static int dp_display_process_hpd_high(struct dp_display_private *dp)
 {
 	struct drm_connector *connector = dp->dp_display.connector;
 	const struct drm_display_info *info = &connector->display_info;
 	int rc = 0;
+
+	if (!dp->dp_display.is_edp)
+		dp_display_lttpr_init(dp);
 
 	rc = dp_panel_read_sink_caps(dp->panel, connector);
 	if (rc)
@@ -1467,14 +1492,14 @@ int msm_dp_modeset_init(struct msm_dp *dp_display, struct drm_device *dev,
 
 	dp_priv = container_of(dp_display, struct dp_display_private, dp_display);
 
-	ret = dp_bridge_init(dp_display, dev, encoder);
+	ret = dp_bridge_init(dp_display, dev, encoder, yuv_supported);
 	if (ret) {
 		DRM_DEV_ERROR(dev->dev,
 			"failed to create dp bridge: %d\n", ret);
 		return ret;
 	}
 
-	dp_display->connector = dp_drm_connector_init(dp_display, encoder, yuv_supported);
+	dp_display->connector = dp_drm_connector_init(dp_display, encoder);
 	if (IS_ERR(dp_display->connector)) {
 		ret = PTR_ERR(dp_display->connector);
 		DRM_DEV_ERROR(dev->dev,

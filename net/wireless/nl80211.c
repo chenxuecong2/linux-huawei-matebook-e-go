@@ -814,7 +814,7 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
 	[NL80211_ATTR_MLO_LINKS] =
 		NLA_POLICY_NESTED_ARRAY(nl80211_policy),
 	[NL80211_ATTR_MLO_LINK_ID] =
-		NLA_POLICY_RANGE(NLA_U8, 0, IEEE80211_MLD_MAX_NUM_LINKS),
+		NLA_POLICY_RANGE(NLA_U8, 0, IEEE80211_MLD_MAX_NUM_LINKS - 1),
 	[NL80211_ATTR_MLD_ADDR] = NLA_POLICY_EXACT_LEN(ETH_ALEN),
 	[NL80211_ATTR_MLO_SUPPORT] = { .type = NLA_FLAG },
 	[NL80211_ATTR_MAX_NUM_AKM_SUITES] = { .type = NLA_REJECT },
@@ -829,6 +829,7 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
 	[NL80211_ATTR_MLO_TTLM_DLINK] = NLA_POLICY_EXACT_LEN(sizeof(u16) * 8),
 	[NL80211_ATTR_MLO_TTLM_ULINK] = NLA_POLICY_EXACT_LEN(sizeof(u16) * 8),
 	[NL80211_ATTR_ASSOC_SPP_AMSDU] = { .type = NLA_FLAG },
+	[NL80211_ATTR_VIF_RADIO_MASK] = { .type = NLA_U32 },
 };
 
 /* policy for the key attributes */
@@ -2430,6 +2431,11 @@ static int nl80211_put_radio(struct wiphy *wiphy, struct sk_buff *msg, int idx)
 	if (nla_put_u32(msg, NL80211_WIPHY_RADIO_ATTR_INDEX, idx))
 		goto nla_put_failure;
 
+	if (r->antenna_mask &&
+	    nla_put_u32(msg, NL80211_WIPHY_RADIO_ATTR_ANTENNA_MASK,
+			r->antenna_mask))
+		goto nla_put_failure;
+
 	for (i = 0; i < r->n_freq_range; i++) {
 		const struct wiphy_radio_freq_range *range = &r->freq_range[i];
 
@@ -3561,7 +3567,7 @@ static int __nl80211_set_channel(struct cfg80211_registered_device *rdev,
 	case NL80211_IFTYPE_MESH_POINT:
 		return cfg80211_set_mesh_channel(rdev, wdev, &chandef);
 	case NL80211_IFTYPE_MONITOR:
-		return cfg80211_set_monitor_channel(rdev, &chandef);
+		return cfg80211_set_monitor_channel(rdev, dev, &chandef);
 	default:
 		break;
 	}
@@ -3996,7 +4002,8 @@ static int nl80211_send_iface(struct sk_buff *msg, u32 portid, u32 seq, int flag
 	    nla_put_u32(msg, NL80211_ATTR_GENERATION,
 			rdev->devlist_generation ^
 			(cfg80211_rdev_list_generation << 2)) ||
-	    nla_put_u8(msg, NL80211_ATTR_4ADDR, wdev->use_4addr))
+	    nla_put_u8(msg, NL80211_ATTR_4ADDR, wdev->use_4addr) ||
+	    nla_put_u32(msg, NL80211_ATTR_VIF_RADIO_MASK, wdev->radio_mask))
 		goto nla_put_failure;
 
 	if (rdev->ops->get_channel && !wdev->valid_links) {
@@ -4199,6 +4206,7 @@ static const struct nla_policy mntr_flags_policy[NL80211_MNTR_FLAG_MAX + 1] = {
 	[NL80211_MNTR_FLAG_OTHER_BSS] = { .type = NLA_FLAG },
 	[NL80211_MNTR_FLAG_COOK_FRAMES] = { .type = NLA_FLAG },
 	[NL80211_MNTR_FLAG_ACTIVE] = { .type = NLA_FLAG },
+	[NL80211_MNTR_FLAG_SKIP_TX] = { .type = NLA_FLAG },
 };
 
 static int parse_monitor_flags(struct nlattr *nla, u32 *mntrflags)
@@ -4312,6 +4320,29 @@ static int nl80211_valid_4addr(struct cfg80211_registered_device *rdev,
 	return -EOPNOTSUPP;
 }
 
+static int nl80211_parse_vif_radio_mask(struct genl_info *info,
+					u32 *radio_mask)
+{
+	struct cfg80211_registered_device *rdev = info->user_ptr[0];
+	struct nlattr *attr = info->attrs[NL80211_ATTR_VIF_RADIO_MASK];
+	u32 mask, allowed;
+
+	if (!attr) {
+		*radio_mask = 0;
+		return 0;
+	}
+
+	allowed = BIT(rdev->wiphy.n_radio) - 1;
+	mask = nla_get_u32(attr);
+	if (mask & ~allowed)
+		return -EINVAL;
+	if (!mask)
+		mask = allowed;
+	*radio_mask = mask;
+
+	return 1;
+}
+
 static int nl80211_set_interface(struct sk_buff *skb, struct genl_info *info)
 {
 	struct cfg80211_registered_device *rdev = info->user_ptr[0];
@@ -4319,6 +4350,8 @@ static int nl80211_set_interface(struct sk_buff *skb, struct genl_info *info)
 	int err;
 	enum nl80211_iftype otype, ntype;
 	struct net_device *dev = info->user_ptr[1];
+	struct wireless_dev *wdev = dev->ieee80211_ptr;
+	u32 radio_mask = 0;
 	bool change = false;
 
 	memset(&params, 0, sizeof(params));
@@ -4332,8 +4365,6 @@ static int nl80211_set_interface(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	if (info->attrs[NL80211_ATTR_MESH_ID]) {
-		struct wireless_dev *wdev = dev->ieee80211_ptr;
-
 		if (ntype != NL80211_IFTYPE_MESH_POINT)
 			return -EINVAL;
 		if (otype != NL80211_IFTYPE_MESH_POINT)
@@ -4364,6 +4395,12 @@ static int nl80211_set_interface(struct sk_buff *skb, struct genl_info *info)
 	if (err > 0)
 		change = true;
 
+	err = nl80211_parse_vif_radio_mask(info, &radio_mask);
+	if (err < 0)
+		return err;
+	if (err && netif_running(dev))
+		return -EBUSY;
+
 	if (change)
 		err = cfg80211_change_iface(rdev, dev, ntype, &params);
 	else
@@ -4372,11 +4409,11 @@ static int nl80211_set_interface(struct sk_buff *skb, struct genl_info *info)
 	if (!err && params.use_4addr != -1)
 		dev->ieee80211_ptr->use_4addr = params.use_4addr;
 
-	if (change && !err) {
-		struct wireless_dev *wdev = dev->ieee80211_ptr;
+	if (radio_mask)
+		wdev->radio_mask = radio_mask;
 
+	if (change && !err)
 		nl80211_notify_iface(rdev, wdev, NL80211_CMD_SET_INTERFACE);
-	}
 
 	return err;
 }
@@ -4387,6 +4424,7 @@ static int _nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 	struct vif_params params;
 	struct wireless_dev *wdev;
 	struct sk_buff *msg;
+	u32 radio_mask;
 	int err;
 	enum nl80211_iftype type = NL80211_IFTYPE_UNSPECIFIED;
 
@@ -4421,6 +4459,10 @@ static int _nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 		return -EOPNOTSUPP;
 
 	err = nl80211_parse_mon_options(rdev, type, info, &params);
+	if (err < 0)
+		return err;
+
+	err = nl80211_parse_vif_radio_mask(info, &radio_mask);
 	if (err < 0)
 		return err;
 
@@ -4464,6 +4506,9 @@ static int _nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 	default:
 		break;
 	}
+
+	if (radio_mask)
+		wdev->radio_mask = radio_mask;
 
 	if (nl80211_send_iface(msg, info->snd_portid, info->snd_seq, 0,
 			       rdev, wdev, NL80211_CMD_NEW_INTERFACE) < 0) {
@@ -6066,7 +6111,7 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
 	if (!rdev->ops->start_ap)
 		return -EOPNOTSUPP;
 
-	if (wdev->cac_started)
+	if (wdev->links[link_id].cac_started)
 		return -EBUSY;
 
 	if (wdev->links[link_id].ap.beacon_interval)
@@ -9180,6 +9225,9 @@ static bool cfg80211_off_channel_oper_allowed(struct wireless_dev *wdev,
 
 	lockdep_assert_wiphy(wdev->wiphy);
 
+	if (!cfg80211_wdev_channel_allowed(wdev, chan))
+		return false;
+
 	if (!cfg80211_beaconing_iface_active(wdev))
 		return true;
 
@@ -9392,7 +9440,8 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 			}
 
 			/* ignore disabled channels */
-			if (chan->flags & IEEE80211_CHAN_DISABLED)
+			if (chan->flags & IEEE80211_CHAN_DISABLED ||
+			    !cfg80211_wdev_channel_allowed(wdev, chan))
 				continue;
 
 			request->channels[i] = chan;
@@ -9412,7 +9461,8 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 
 				chan = &wiphy->bands[band]->channels[j];
 
-				if (chan->flags & IEEE80211_CHAN_DISABLED)
+				if (chan->flags & IEEE80211_CHAN_DISABLED ||
+				    !cfg80211_wdev_channel_allowed(wdev, chan))
 					continue;
 
 				request->channels[i] = chan;
@@ -9776,9 +9826,11 @@ nl80211_parse_sched_scan(struct wiphy *wiphy, struct wireless_dev *wdev,
 	request = kzalloc(size, GFP_KERNEL);
 	if (!request)
 		return ERR_PTR(-ENOMEM);
+	request->n_channels = n_channels;
 
 	if (n_ssids)
-		request->ssids = (void *)&request->channels[n_channels];
+		request->ssids = (void *)request +
+			struct_size(request, channels, n_channels);
 	request->n_ssids = n_ssids;
 	if (ie_len) {
 		if (n_ssids)
@@ -10072,6 +10124,7 @@ static int nl80211_start_radar_detection(struct sk_buff *skb,
 	struct cfg80211_registered_device *rdev = info->user_ptr[0];
 	struct net_device *dev = info->user_ptr[1];
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
+	int link_id = nl80211_link_id(info->attrs);
 	struct wiphy *wiphy = wdev->wiphy;
 	struct cfg80211_chan_def chandef;
 	enum nl80211_dfs_regions dfs_region;
@@ -10121,7 +10174,20 @@ static int nl80211_start_radar_detection(struct sk_buff *skb,
 		goto unlock;
 	}
 
-	if (cfg80211_beaconing_iface_active(wdev) || wdev->cac_started) {
+	if (cfg80211_beaconing_iface_active(wdev)) {
+		/* During MLO other link(s) can beacon, only the current link
+		 * can not already beacon
+		 */
+		if (wdev->valid_links &&
+		    !wdev->links[link_id].ap.beacon_interval) {
+			/* nothing */
+		} else {
+			err = -EBUSY;
+			goto unlock;
+		}
+	}
+
+	if (wdev->links[link_id].cac_started) {
 		err = -EBUSY;
 		goto unlock;
 	}
@@ -10141,12 +10207,26 @@ static int nl80211_start_radar_detection(struct sk_buff *skb,
 	if (WARN_ON(!cac_time_ms))
 		cac_time_ms = IEEE80211_DFS_MIN_CAC_TIME_MS;
 
-	err = rdev_start_radar_detection(rdev, dev, &chandef, cac_time_ms);
+	err = rdev_start_radar_detection(rdev, dev, &chandef, cac_time_ms,
+					 link_id);
 	if (!err) {
-		wdev->links[0].ap.chandef = chandef;
-		wdev->cac_started = true;
-		wdev->cac_start_time = jiffies;
-		wdev->cac_time_ms = cac_time_ms;
+		switch (wdev->iftype) {
+		case NL80211_IFTYPE_AP:
+		case NL80211_IFTYPE_P2P_GO:
+			wdev->links[0].ap.chandef = chandef;
+			break;
+		case NL80211_IFTYPE_ADHOC:
+			wdev->u.ibss.chandef = chandef;
+			break;
+		case NL80211_IFTYPE_MESH_POINT:
+			wdev->u.mesh.chandef = chandef;
+			break;
+		default:
+			break;
+		}
+		wdev->links[link_id].cac_started = true;
+		wdev->links[link_id].cac_start_time = jiffies;
+		wdev->links[link_id].cac_time_ms = cac_time_ms;
 	}
 unlock:
 	wiphy_unlock(wiphy);
@@ -10494,17 +10574,21 @@ static int nl80211_send_bss(struct sk_buff *msg, struct netlink_callback *cb,
 				NL80211_BSS_CHAIN_SIGNAL))
 		goto nla_put_failure;
 
-	switch (rdev->wiphy.signal_type) {
-	case CFG80211_SIGNAL_TYPE_MBM:
-		if (nla_put_u32(msg, NL80211_BSS_SIGNAL_MBM, res->signal))
-			goto nla_put_failure;
-		break;
-	case CFG80211_SIGNAL_TYPE_UNSPEC:
-		if (nla_put_u8(msg, NL80211_BSS_SIGNAL_UNSPEC, res->signal))
-			goto nla_put_failure;
-		break;
-	default:
-		break;
+	if (intbss->bss_source != BSS_SOURCE_STA_PROFILE) {
+		switch (rdev->wiphy.signal_type) {
+		case CFG80211_SIGNAL_TYPE_MBM:
+			if (nla_put_u32(msg, NL80211_BSS_SIGNAL_MBM,
+					res->signal))
+				goto nla_put_failure;
+			break;
+		case CFG80211_SIGNAL_TYPE_UNSPEC:
+			if (nla_put_u8(msg, NL80211_BSS_SIGNAL_UNSPEC,
+				       res->signal))
+				goto nla_put_failure;
+			break;
+		default:
+			break;
+		}
 	}
 
 	switch (wdev->iftype) {
@@ -16498,10 +16582,10 @@ nl80211_set_ttlm(struct sk_buff *skb, struct genl_info *info)
 	SELECTOR(__sel, NETDEV_UP_NOTMX,		\
 		 NL80211_FLAG_NEED_NETDEV_UP |		\
 		 NL80211_FLAG_NO_WIPHY_MTX)		\
-	SELECTOR(__sel, NETDEV_UP_NOTMX_NOMLO,		\
+	SELECTOR(__sel, NETDEV_UP_NOTMX_MLO,		\
 		 NL80211_FLAG_NEED_NETDEV_UP |		\
 		 NL80211_FLAG_NO_WIPHY_MTX |		\
-		 NL80211_FLAG_MLO_UNSUPPORTED)		\
+		 NL80211_FLAG_MLO_VALID_LINK_ID)	\
 	SELECTOR(__sel, NETDEV_UP_CLEAR,		\
 		 NL80211_FLAG_NEED_NETDEV_UP |		\
 		 NL80211_FLAG_CLEAR_SKB)		\
@@ -17396,7 +17480,7 @@ static const struct genl_small_ops nl80211_small_ops[] = {
 		.flags = GENL_UNS_ADMIN_PERM,
 		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
 					 NL80211_FLAG_NO_WIPHY_MTX |
-					 NL80211_FLAG_MLO_UNSUPPORTED),
+					 NL80211_FLAG_MLO_VALID_LINK_ID),
 	},
 	{
 		.cmd = NL80211_CMD_GET_PROTOCOL_FEATURES,
@@ -17953,10 +18037,8 @@ void nl80211_common_reg_change_event(enum nl80211_commands cmd_id,
 
 	genlmsg_end(msg, hdr);
 
-	rcu_read_lock();
 	genlmsg_multicast_allns(&nl80211_fam, msg, 0,
-				NL80211_MCGRP_REGULATORY, GFP_ATOMIC);
-	rcu_read_unlock();
+				NL80211_MCGRP_REGULATORY);
 
 	return;
 
@@ -18689,10 +18771,8 @@ void nl80211_send_beacon_hint_event(struct wiphy *wiphy,
 
 	genlmsg_end(msg, hdr);
 
-	rcu_read_lock();
 	genlmsg_multicast_allns(&nl80211_fam, msg, 0,
-				NL80211_MCGRP_REGULATORY, GFP_ATOMIC);
-	rcu_read_unlock();
+				NL80211_MCGRP_REGULATORY);
 
 	return;
 

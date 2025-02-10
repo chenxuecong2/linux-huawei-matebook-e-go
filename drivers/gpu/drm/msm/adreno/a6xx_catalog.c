@@ -705,6 +705,35 @@ static const struct adreno_info a6xx_gpus[] = {
 			{ 127, 4 },
 		),
 	}, {
+		.chip_ids = ADRENO_CHIP_IDS(0x06010500),
+		.family = ADRENO_6XX_GEN1,
+		.revn = 615,
+		.fw = {
+			[ADRENO_FW_SQE] = "a630_sqe.fw",
+			[ADRENO_FW_GMU] = "a630_gmu.bin",
+		},
+		.gmem = SZ_512K,
+		.inactive_period = DRM_MSM_INACTIVE_PERIOD,
+		.init = a6xx_gpu_init,
+		.zapfw = "a615_zap.mdt",
+		.a6xx = &(const struct a6xx_info) {
+			.hwcg = a615_hwcg,
+			.protect = &a630_protect,
+			.gmu_cgc_mode = 0x00000222,
+			.prim_fifo_threshold = 0x0018000,
+		},
+		.speedbins = ADRENO_SPEEDBINS(
+			/*
+			 * The default speed bin (0) has the same values as
+			 * speed bin 90 which goes up to 432 MHz.
+			 */
+			{ 0,   0 },
+			{ 90,  0 },
+			{ 105, 1 },
+			{ 146, 2 },
+			{ 163, 3 },
+		),
+	}, {
 		.machine = "qcom,sm7150",
 		.chip_ids = ADRENO_CHIP_IDS(0x06010800),
 		.family = ADRENO_6XX_GEN1,
@@ -966,6 +995,7 @@ static const struct adreno_info a6xx_gpus[] = {
 		.speedbins = ADRENO_SPEEDBINS(
 			{ 0,   0 },
 			{ 117, 0 },
+			{ 129, 4 },
 			{ 172, 2 }, /* Called speedbin 1 downstream, but let's not break things! */
 			{ 190, 1 },
 		),

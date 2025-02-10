@@ -1300,13 +1300,29 @@ static int btrfs_issue_discard(struct block_device *bdev, u64 start, u64 len,
 		bytes_left = end - start;
 	}
 
-	if (bytes_left) {
+	while (bytes_left) {
+		u64 bytes_to_discard = min(BTRFS_MAX_DISCARD_CHUNK_SIZE, bytes_left);
+
 		ret = blkdev_issue_discard(bdev, start >> SECTOR_SHIFT,
-					   bytes_left >> SECTOR_SHIFT,
+					   bytes_to_discard >> SECTOR_SHIFT,
 					   GFP_NOFS);
-		if (!ret)
-			*discarded_bytes += bytes_left;
+
+		if (ret) {
+			if (ret != -EOPNOTSUPP)
+				break;
+			continue;
+		}
+
+		start += bytes_to_discard;
+		bytes_left -= bytes_to_discard;
+		*discarded_bytes += bytes_to_discard;
+
+		if (btrfs_trim_interrupted()) {
+			ret = -ERESTARTSYS;
+			break;
+		}
 	}
+
 	return ret;
 }
 
@@ -2430,7 +2446,7 @@ int btrfs_cross_ref_exist(struct btrfs_root *root, u64 objectid, u64 offset,
 			goto out;
 
 		ret = check_delayed_ref(root, path, objectid, offset, bytenr);
-	} while (ret == -EAGAIN);
+	} while (ret == -EAGAIN && !path->nowait);
 
 out:
 	btrfs_release_path(path);
@@ -5292,7 +5308,7 @@ static bool visit_node_for_delete(struct btrfs_root *root, struct walk_control *
 	 * reference to it.
 	 */
 	generation = btrfs_node_ptr_generation(eb, slot);
-	if (!wc->update_ref || generation <= root->root_key.offset)
+	if (!wc->update_ref || generation <= btrfs_root_origin_generation(root))
 		return false;
 
 	/*
@@ -5347,7 +5363,7 @@ static noinline void reada_walk_down(struct btrfs_trans_handle *trans,
 			goto reada;
 
 		if (wc->stage == UPDATE_BACKREF &&
-		    generation <= root->root_key.offset)
+		    generation <= btrfs_root_origin_generation(root))
 			continue;
 
 		/* We don't lock the tree block, it's OK to be racy here */
@@ -5690,7 +5706,7 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
 	 * for the subtree
 	 */
 	if (wc->stage == UPDATE_BACKREF &&
-	    generation <= root->root_key.offset) {
+	    generation <= btrfs_root_origin_generation(root)) {
 		wc->lookup_info = 1;
 		return 1;
 	}
@@ -6459,7 +6475,7 @@ static int btrfs_trim_free_extents(struct btrfs_device *device, u64 *trimmed)
 		start += len;
 		*trimmed += bytes;
 
-		if (fatal_signal_pending(current)) {
+		if (btrfs_trim_interrupted()) {
 			ret = -ERESTARTSYS;
 			break;
 		}
@@ -6551,13 +6567,13 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
 			continue;
 
 		ret = btrfs_trim_free_extents(device, &group_trimmed);
+
+		trimmed += group_trimmed;
 		if (ret) {
 			dev_failed++;
 			dev_ret = ret;
 			break;
 		}
-
-		trimmed += group_trimmed;
 	}
 	mutex_unlock(&fs_devices->device_list_mutex);
 

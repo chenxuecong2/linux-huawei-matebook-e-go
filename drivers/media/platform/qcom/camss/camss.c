@@ -2143,9 +2143,11 @@ static int camss_configure_pd(struct camss *camss)
 							  camss->genpd_num - 1);
 		if (IS_ERR(camss->genpd))
 			return PTR_ERR(camss->genpd);
-		if (!camss->genpd)
-			return -ENODEV;
 	}
+
+	if (!camss->genpd)
+		return -ENODEV;
+
 	camss->genpd_link = device_link_add(camss->dev, camss->genpd,
 					    DL_FLAG_STATELESS | DL_FLAG_PM_RUNTIME |
 					    DL_FLAG_RPM_ACTIVE);

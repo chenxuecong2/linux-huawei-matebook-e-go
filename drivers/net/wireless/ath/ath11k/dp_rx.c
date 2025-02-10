@@ -2546,7 +2546,7 @@ static int ath11k_dp_rx_process_msdu(struct ath11k *ar,
 	lrx_desc = (struct hal_rx_desc *)last_buf->data;
 	rx_attention = ath11k_dp_rx_get_attention(ab, lrx_desc);
 	if (!ath11k_dp_rx_h_attn_msdu_done(rx_attention)) {
-		ath11k_warn(ab, "msdu_done bit in attention is not set\n");
+		/* ath11k_warn(ab, "msdu_done bit in attention is not set\n"); */
 		ret = -EIO;
 		goto free_out;
 	}
@@ -2697,7 +2697,7 @@ try_again:
 		if (unlikely(push_reason !=
 			     HAL_REO_DEST_RING_PUSH_REASON_ROUTING_INSTRUCTION)) {
 			dev_kfree_skb_any(msdu);
-			ab->soc_stats.hal_reo_error[dp->reo_dst_ring[ring_id].ring_id]++;
+			ab->soc_stats.hal_reo_error[ring_id]++;
 			continue;
 		}
 
@@ -3872,6 +3872,7 @@ int ath11k_dp_process_rx_err(struct ath11k_base *ab, struct napi_struct *napi,
 		ath11k_hal_rx_msdu_link_info_get(link_desc_va, &num_msdus, msdu_cookies,
 						 &rbm);
 		if (rbm != HAL_RX_BUF_RBM_WBM_IDLE_DESC_LIST &&
+		    rbm != HAL_RX_BUF_RBM_SW1_BM &&
 		    rbm != HAL_RX_BUF_RBM_SW3_BM) {
 			ab->soc_stats.invalid_rbm++;
 			ath11k_warn(ab, "invalid return buffer manager %d\n", rbm);
@@ -4690,11 +4691,12 @@ static void ath11k_dp_mon_get_buf_len(struct hal_rx_msdu_desc_info *info,
 	}
 }
 
-static u32
-ath11k_dp_rx_mon_mpdu_pop(struct ath11k *ar, int mac_id,
-			  void *ring_entry, struct sk_buff **head_msdu,
-			  struct sk_buff **tail_msdu, u32 *npackets,
-			  u32 *ppdu_id)
+/* clang stack usage explodes if this is inlined */
+static noinline_for_stack
+u32 ath11k_dp_rx_mon_mpdu_pop(struct ath11k *ar, int mac_id,
+			      void *ring_entry, struct sk_buff **head_msdu,
+			      struct sk_buff **tail_msdu, u32 *npackets,
+			      u32 *ppdu_id)
 {
 	struct ath11k_pdev_dp *dp = &ar->dp;
 	struct ath11k_mon_data *pmon = (struct ath11k_mon_data *)&dp->mon_data;
@@ -5293,8 +5295,11 @@ int ath11k_dp_rx_process_mon_status(struct ath11k_base *ab, int mac_id,
 		    hal_status == HAL_TLV_STATUS_PPDU_DONE) {
 			rx_mon_stats->status_ppdu_done++;
 			pmon->mon_ppdu_status = DP_PPDU_STATUS_DONE;
-			ath11k_dp_rx_mon_dest_process(ar, mac_id, budget, napi);
-			pmon->mon_ppdu_status = DP_PPDU_STATUS_START;
+			if (!ab->hw_params.full_monitor_mode) {
+				ath11k_dp_rx_mon_dest_process(ar, mac_id,
+							      budget, napi);
+				pmon->mon_ppdu_status = DP_PPDU_STATUS_START;
+			}
 		}
 
 		if (ppdu_info->peer_id == HAL_INVALID_PEERID ||

@@ -17,6 +17,7 @@
 #include <dt-bindings/clock/qcom,videocc-sm8150.h>
 #include <dt-bindings/interconnect/qcom,osm-l3.h>
 #include <dt-bindings/interconnect/qcom,sm8150.h>
+#include <dt-bindings/clock/qcom,sm8150-camcc.h>
 #include <dt-bindings/thermal/thermal.h>
 
 / {
@@ -3657,6 +3658,8 @@
 				iommus = <&apps_smmu 0x140 0>;
 				snps,dis_u2_susphy_quirk;
 				snps,dis_enblslpm_quirk;
+				snps,dis-u1-entry-quirk;
+				snps,dis-u2-entry-quirk;
 				phys = <&usb_1_hsphy>, <&usb_1_qmpphy QMP_USB43DP_USB3_PHY>;
 				phy-names = "usb2-phy", "usb3-phy";
 
@@ -3734,6 +3737,8 @@
 				iommus = <&apps_smmu 0x160 0>;
 				snps,dis_u2_susphy_quirk;
 				snps,dis_enblslpm_quirk;
+				snps,dis-u1-entry-quirk;
+				snps,dis-u2-entry-quirk;
 				phys = <&usb_2_hsphy>, <&usb_2_qmpphy>;
 				phy-names = "usb2-phy", "usb3-phy";
 			};
@@ -3757,6 +3762,18 @@
 			reg = <0 0x0ac00000 0 0x1000>;
 			#interconnect-cells = <2>;
 			qcom,bcm-voters = <&apps_bcm_voter>;
+		};
+
+		camcc: clock-controller@ad00000 {
+			compatible = "qcom,sm8150-camcc";
+			reg = <0 0x0ad00000 0 0x10000>;
+			clocks = <&rpmhcc RPMH_CXO_CLK>,
+				 <&gcc GCC_CAMERA_AHB_CLK>;
+			power-domains = <&rpmhpd SM8150_MMCX>;
+			required-opps = <&rpmhpd_opp_low_svs>;
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+			#power-domain-cells = <1>;
 		};
 
 		mdss: display-subsystem@ae00000 {
@@ -4283,7 +4300,6 @@
 				     <GIC_SPI 407 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 408 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 409 IRQ_TYPE_LEVEL_HIGH>;
-			dma-coherent;
 		};
 
 		remoteproc_adsp: remoteproc@17300000 {

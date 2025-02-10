@@ -23,14 +23,4 @@ config TYPEC_NVIDIA_ALTMODE
 	  To compile this driver as a module, choose M here: the
 	  module will be called typec_nvidia.
 
-config TYPEC_GAOKUN_ALTMODE
-	tristate "NVIDIA Alternate Mode driver"
-	depends on TYPEC_DP_ALTMODE
-	help
-	  Latest NVIDIA GPUs support VirtualLink devices. Select this
-	  to enable support for VirtualLink devices with NVIDIA GPUs.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called typec_nvidia.	  
-
 endmenu

@@ -11,7 +11,9 @@
 #include <dt-bindings/clock/qcom,sc8280xp-camcc.h>
 #include <dt-bindings/clock/qcom,sc8280xp-lpasscc.h>
 #include <dt-bindings/clock/qcom,sm8350-videocc.h>
+#include <dt-bindings/interconnect/qcom,icc.h>
 #include <dt-bindings/interconnect/qcom,osm-l3.h>
+#include <dt-bindings/interconnect/qcom,icc.h>
 #include <dt-bindings/interconnect/qcom,sc8280xp.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/mailbox/qcom-ipcc.h>
@@ -706,6 +708,11 @@
 			no-map;
 		};
 
+		pil_slpi_mem: slpi-region@88c00000 {
+			reg = <0 0x88c00000 0 0x1500000>;
+			no-map;
+		};
+
 		pil_nsp0_mem: cdsp0-region@8a100000 {
 			reg = <0 0x8a100000 0 0x1e00000>;
 			no-map;
@@ -740,6 +747,30 @@
 		};
 
 		smp2p_adsp_in: slave-kernel {
+			qcom,entry-name = "slave-kernel";
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
+	};
+
+	smp2p-slpi {
+		compatible = "qcom,smp2p";
+		qcom,smem = <481>, <430>;
+		interrupts-extended = <&ipcc IPCC_CLIENT_SLPI
+					     IPCC_MPROC_SIGNAL_SMP2P
+					     IRQ_TYPE_EDGE_RISING>;
+		mboxes = <&ipcc IPCC_CLIENT_SLPI
+				IPCC_MPROC_SIGNAL_SMP2P>;
+
+		qcom,local-pid = <0>;
+		qcom,remote-pid = <3>;
+
+		smp2p_slpi_out: master-kernel {
+			qcom,entry-name = "master-kernel";
+			#qcom,smem-state-cells = <1>;
+		};
+
+		smp2p_slpi_in: slave-kernel {
 			qcom,entry-name = "slave-kernel";
 			interrupt-controller;
 			#interrupt-cells = <2>;
@@ -1763,8 +1794,6 @@
 			linux,pci-domain = <6>;
 			num-lanes = <1>;
 
-			msi-map = <0x0 &its 0xe0000 0x10000>;
-
 			interrupts = <GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>,
@@ -1800,8 +1829,10 @@
 			assigned-clocks = <&gcc GCC_PCIE_4_AUX_CLK>;
 			assigned-clock-rates = <19200000>;
 
-			interconnects = <&aggre2_noc MASTER_PCIE_4 0 &mc_virt SLAVE_EBI1 0>,
-					<&gem_noc MASTER_APPSS_PROC 0 &config_noc SLAVE_PCIE_4 0>;
+			interconnects = <&aggre2_noc MASTER_PCIE_4 QCOM_ICC_TAG_ALWAYS
+					 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+					<&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+					 &config_noc SLAVE_PCIE_4 QCOM_ICC_TAG_ACTIVE_ONLY>;
 			interconnect-names = "pcie-mem", "cpu-pcie";
 
 			resets = <&gcc GCC_PCIE_4_BCR>;
@@ -1911,8 +1942,10 @@
 			assigned-clocks = <&gcc GCC_PCIE_3B_AUX_CLK>;
 			assigned-clock-rates = <19200000>;
 
-			interconnects = <&aggre2_noc MASTER_PCIE_3B 0 &mc_virt SLAVE_EBI1 0>,
-					<&gem_noc MASTER_APPSS_PROC 0 &config_noc SLAVE_PCIE_3B 0>;
+			interconnects = <&aggre2_noc MASTER_PCIE_3B QCOM_ICC_TAG_ALWAYS
+					 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+					<&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+					 &config_noc SLAVE_PCIE_3B QCOM_ICC_TAG_ACTIVE_ONLY>;
 			interconnect-names = "pcie-mem", "cpu-pcie";
 
 			resets = <&gcc GCC_PCIE_3B_BCR>;
@@ -2022,8 +2055,10 @@
 			assigned-clocks = <&gcc GCC_PCIE_3A_AUX_CLK>;
 			assigned-clock-rates = <19200000>;
 
-			interconnects = <&aggre2_noc MASTER_PCIE_3A 0 &mc_virt SLAVE_EBI1 0>,
-					<&gem_noc MASTER_APPSS_PROC 0 &config_noc SLAVE_PCIE_3A 0>;
+			interconnects = <&aggre2_noc MASTER_PCIE_3A QCOM_ICC_TAG_ALWAYS
+					 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+					<&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+					 &config_noc SLAVE_PCIE_3A QCOM_ICC_TAG_ACTIVE_ONLY>;
 			interconnect-names = "pcie-mem", "cpu-pcie";
 
 			resets = <&gcc GCC_PCIE_3A_BCR>;
@@ -2136,8 +2171,10 @@
 			assigned-clocks = <&gcc GCC_PCIE_2B_AUX_CLK>;
 			assigned-clock-rates = <19200000>;
 
-			interconnects = <&aggre2_noc MASTER_PCIE_2B 0 &mc_virt SLAVE_EBI1 0>,
-					<&gem_noc MASTER_APPSS_PROC 0 &config_noc SLAVE_PCIE_2B 0>;
+			interconnects = <&aggre2_noc MASTER_PCIE_2B QCOM_ICC_TAG_ALWAYS
+					 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+					<&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+					 &config_noc SLAVE_PCIE_2B QCOM_ICC_TAG_ACTIVE_ONLY>;
 			interconnect-names = "pcie-mem", "cpu-pcie";
 
 			resets = <&gcc GCC_PCIE_2B_BCR>;
@@ -2247,8 +2284,10 @@
 			assigned-clocks = <&gcc GCC_PCIE_2A_AUX_CLK>;
 			assigned-clock-rates = <19200000>;
 
-			interconnects = <&aggre2_noc MASTER_PCIE_2A 0 &mc_virt SLAVE_EBI1 0>,
-					<&gem_noc MASTER_APPSS_PROC 0 &config_noc SLAVE_PCIE_2A 0>;
+			interconnects = <&aggre2_noc MASTER_PCIE_2A QCOM_ICC_TAG_ALWAYS
+					 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+					<&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+					 &config_noc SLAVE_PCIE_2A QCOM_ICC_TAG_ACTIVE_ONLY>;
 			interconnect-names = "pcie-mem", "cpu-pcie";
 
 			resets = <&gcc GCC_PCIE_2A_BCR>;
@@ -2634,6 +2673,12 @@
 			status = "disabled";
 		};
 
+		refgen: regulator@88e6000 {
+			compatible = "qcom,sc8280xp-refgen-regulator",
+				     "qcom,sm8250-refgen-regulator";
+			reg = <0x0 0x088e6000 0x0 0x84>;
+		};
+
 		usb_2_hsphy0: phy@88e7000 {
 			compatible = "qcom,sc8280xp-usb-hs-phy",
 				     "qcom,usb-snps-hs-5nm-phy";
@@ -2734,9 +2779,76 @@
 			status = "disabled";
 		};
 
+		remoteproc_slpi: remoteproc@2400000 { /* FIXME */
+			compatible = "qcom,sc8280xp-slpi-pas";
+			reg = <0 0x02400000 0 0x4000>;
+
+			interrupts-extended = <&pdc 9 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_slpi_in 0 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_slpi_in 1 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_slpi_in 2 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_slpi_in 3 IRQ_TYPE_EDGE_RISING>;
+			interrupt-names = "wdog", "fatal", "ready",
+					  "handover", "stop-ack";
+
+			clocks = <&rpmhcc RPMH_CXO_CLK>;
+			clock-names = "xo";
+
+			power-domains = <&rpmhpd SC8280XP_LCX>,
+							<&rpmhpd SC8280XP_LMX>;
+			power-domain-names = "lcx", "lmx";
+
+			memory-region = <&pil_slpi_mem>;
+
+			qcom,qmp = <&aoss_qmp>;
+
+			qcom,smem-states = <&smp2p_slpi_out 0>;
+			qcom,smem-state-names = "stop";
+
+			status = "disabled";
+
+			glink-edge {
+				interrupts-extended = <&ipcc IPCC_CLIENT_SLPI
+							     IPCC_MPROC_SIGNAL_GLINK_QMP
+							     IRQ_TYPE_EDGE_RISING>;
+				mboxes = <&ipcc IPCC_CLIENT_SLPI
+						IPCC_MPROC_SIGNAL_GLINK_QMP>;
+
+				label = "slpi";
+				qcom,remote-pid = <3>;
+
+				fastrpc {
+					compatible = "qcom,fastrpc";
+					qcom,glink-channels = "fastrpcglink-apps-dsp";
+					label = "sdsp";
+					qcom,non-secure-domain;
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					compute-cb@1 {
+						compatible = "qcom,fastrpc-compute-cb";
+						reg = <1>;
+					//	iommus = <&apps_smmu 0x0541 0x0>;
+					};
+
+					compute-cb@2 {
+						compatible = "qcom,fastrpc-compute-cb";
+						reg = <2>;
+					//	iommus = <&apps_smmu 0x0542 0x0>;
+					};
+
+					compute-cb@3 {
+						compatible = "qcom,fastrpc-compute-cb";
+						reg = <3>;
+					//	iommus = <&apps_smmu 0x0543 0x0>;
+					};
+				};
+			};
+		};
+
 		remoteproc_adsp: remoteproc@3000000 {
 			compatible = "qcom,sc8280xp-adsp-pas";
-			reg = <0 0x03000000 0 0x100>;
+			reg = <0 0x03000000 0 0x10000>;
 
 			interrupts-extended = <&intc GIC_SPI 162 IRQ_TYPE_EDGE_RISING>,
 					      <&smp2p_adsp_in 0 IRQ_TYPE_EDGE_RISING>,
@@ -3529,6 +3641,8 @@
 					    "usb2-2",
 					    "usb2-3";
 				dr_mode = "host";
+				snps,dis-u1-entry-quirk;
+				snps,dis-u2-entry-quirk;
 			};
 		};
 
@@ -3586,6 +3700,8 @@
 				iommus = <&apps_smmu 0x820 0x0>;
 				phys = <&usb_0_hsphy>, <&usb_0_qmpphy QMP_USB43DP_USB3_PHY>;
 				phy-names = "usb2-phy", "usb3-phy";
+				snps,dis-u1-entry-quirk;
+				snps,dis-u2-entry-quirk;
 
 				ports {
 					#address-cells = <1>;
@@ -3663,6 +3779,8 @@
 				iommus = <&apps_smmu 0x860 0x0>;
 				phys = <&usb_1_hsphy>, <&usb_1_qmpphy QMP_USB43DP_USB3_PHY>;
 				phy-names = "usb2-phy", "usb3-phy";
+				snps,dis-u1-entry-quirk;
+				snps,dis-u2-entry-quirk;
 
 				ports {
 					#address-cells = <1>;
@@ -3719,14 +3837,6 @@
 			memory-region = <&pil_video_mem>;
 
 			status = "disabled";
-
-			video-decoder {
-				compatible = "venus-decoder";
-			};
-
-			video-encoder {
-				compatible = "venus-encoder";
-			};
 
 			venus_opp_table: opp-table {
 				compatible = "operating-points-v2";
@@ -4191,8 +4301,12 @@
 				      "core";
 			interrupts = <GIC_SPI 83 IRQ_TYPE_LEVEL_HIGH>;
 			interconnects = <&mmss_noc MASTER_MDP0 0 &mc_virt SLAVE_EBI1 0>,
-					<&mmss_noc MASTER_MDP1 0 &mc_virt SLAVE_EBI1 0>;
-			interconnect-names = "mdp0-mem", "mdp1-mem";
+					<&mmss_noc MASTER_MDP1 0 &mc_virt SLAVE_EBI1 0>,
+					<&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+					 &config_noc SLAVE_DISPLAY_CFG QCOM_ICC_TAG_ACTIVE_ONLY>;
+			interconnect-names = "mdp0-mem",
+					     "mdp1-mem",
+					     "cpu-cfg";
 			iommus = <&apps_smmu 0x1000 0x402>;
 			power-domains = <&dispcc0 MDSS_GDSC>;
 			resets = <&dispcc0 DISP_CC_MDSS_CORE_BCR>;
@@ -4242,7 +4356,7 @@
 						};
 					};
 
-					port@1 { /* refer to sc8280xp_intf in drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_8_0_sc8280xp.h */
+					port@1 { // refer to drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_8_0_sc8280xp.h
 						reg = <1>;
 						mdss0_intf1_out: endpoint {
 							remote-endpoint = <&mdss0_dsi0_in>;
@@ -4387,7 +4501,7 @@
 			};
 
 			mdss0_dsi0: dsi@ae94000 {
-				compatible = "qcom,sc8280xp-dsi-ctrl", "qcom,mdss-dsi-ctrl"; /* "qcom,sc8280xp-dsi-ctrl" is dummy  */
+				compatible = "qcom,sc8280xp-dsi-ctrl", "qcom,mdss-dsi-ctrl";/* "qcom,sc8280xp-dsi-ctrl" is dummy  */
 				reg = <0 0x0ae94000 0 0x400>;
 				reg-names = "dsi_ctrl";
 
@@ -4414,6 +4528,7 @@
 
 				operating-points-v2 = <&mdss0_dsi0_opp_table>;
 				power-domains = <&rpmhpd SC8280XP_MMCX>;
+				refgen-supply = <&refgen>;
 
 				phy-names = "dsi";
 
@@ -4447,7 +4562,7 @@
 
 					opp-187500000 {
 						opp-hz = /bits/ 64 <187500000>;
-						required-opps = <&rpmhpd_opp_svs>; /* FIXME: &rpmhpd_opp_low_svs */
+						required-opps = <&rpmhpd_opp_low_svs>;
 					};
 
 					opp-300000000 {
@@ -4466,7 +4581,7 @@
 				compatible = "qcom,sc8280xp-dsi-phy-5nm";
 				reg = <0 0x0ae94400 0 0x200>,
 				      <0 0x0ae94600 0 0x280>,
-				      <0 0x0ae94900 0 0x27c>; /* FIXME: maybe 0x260 or other? */
+				      <0 0x0ae94900 0 0x27c>;// FIXME maybe 0x260?
 				reg-names = "dsi_phy",
 					    "dsi_phy_lane",
 					    "dsi_pll";
@@ -4509,6 +4624,7 @@
 
 				operating-points-v2 = <&mdss0_dsi1_opp_table>;
 				power-domains = <&rpmhpd SC8280XP_MMCX>;
+				refgen-supply = <&refgen>;
 
 				phys = <&mdss0_dsi1_phy>;
 				phy-names = "dsi";
@@ -4542,7 +4658,7 @@
 
 					opp-187500000 {
 						opp-hz = /bits/ 64 <187500000>;
-						required-opps = <&rpmhpd_opp_svs>; /* FIXME: &rpmhpd_opp_low_svs */
+						required-opps = <&rpmhpd_opp_low_svs>;
 					};
 
 					opp-300000000 {
@@ -4561,7 +4677,7 @@
 				compatible = "qcom,sc8280xp-dsi-phy-5nm";
 				reg = <0 0x0ae96400 0 0x200>,
 				      <0 0x0ae96600 0 0x280>,
-				      <0 0x0ae96900 0 0x27c>; /* FIXME: maybe 0x260 or other? */
+				      <0 0x0ae96900 0 0x27c>;// FIXME maybe 0x260?
 				reg-names = "dsi_phy",
 					    "dsi_phy_lane",
 					    "dsi_pll";
@@ -4850,7 +4966,7 @@
 				 <&mdss0_dp2_phy 1>,
 				 <&mdss0_dp3_phy 0>,
 				 <&mdss0_dp3_phy 1>,
-				 <&mdss0_dsi0_phy 0>, // why this order? refer to drivers/clk/qcom/dispcc-sc8280xp.c
+				 <&mdss0_dsi0_phy 0>,// why this order? refer to drivers/clk/qcom/dispcc-sc8280xp.c
 				 <&mdss0_dsi0_phy 1>,
 				 <&mdss0_dsi1_phy 0>,
 				 <&mdss0_dsi1_phy 1>;
@@ -5501,7 +5617,7 @@
 
 		remoteproc_nsp0: remoteproc@1b300000 {
 			compatible = "qcom,sc8280xp-nsp0-pas";
-			reg = <0 0x1b300000 0 0x100>;
+			reg = <0 0x1b300000 0 0x10000>;
 
 			interrupts-extended = <&intc GIC_SPI 578 IRQ_TYPE_EDGE_RISING>,
 					      <&smp2p_nsp0_in 0 IRQ_TYPE_EDGE_RISING>,
@@ -5654,7 +5770,7 @@
 
 		remoteproc_nsp1: remoteproc@21300000 {
 			compatible = "qcom,sc8280xp-nsp1-pas";
-			reg = <0 0x21300000 0 0x100>;
+			reg = <0 0x21300000 0 0x10000>;
 
 			interrupts-extended = <&intc GIC_SPI 887 IRQ_TYPE_EDGE_RISING>,
 					      <&smp2p_nsp1_in 0 IRQ_TYPE_EDGE_RISING>,
@@ -5921,6 +6037,7 @@
 
 				operating-points-v2 = <&mdss1_dsi0_opp_table>;
 				power-domains = <&rpmhpd SC8280XP_MMCX>;
+				refgen-supply = <&refgen>;
 
 				phy-names = "dsi";
 
@@ -5954,7 +6071,7 @@
 
 					opp-187500000 {
 						opp-hz = /bits/ 64 <187500000>;
-						required-opps = <&rpmhpd_opp_svs>;
+						required-opps = <&rpmhpd_opp_low_svs>;
 					};
 
 					opp-300000000 {
@@ -6016,6 +6133,7 @@
 
 				operating-points-v2 = <&mdss1_dsi1_opp_table>;
 				power-domains = <&rpmhpd SC8280XP_MMCX>;
+				refgen-supply = <&refgen>;
 
 				phys = <&mdss1_dsi1_phy>;
 				phy-names = "dsi";
@@ -6049,7 +6167,7 @@
 
 					opp-187500000 {
 						opp-hz = /bits/ 64 <187500000>;
-						required-opps = <&rpmhpd_opp_svs>;
+						required-opps = <&rpmhpd_opp_low_svs>;
 					};
 
 					opp-300000000 {

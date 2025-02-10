@@ -22,7 +22,7 @@
 #include <net/cfg80211.h>
 #include <net/codel.h>
 #include <net/ieee80211_radiotap.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 /**
  * DOC: Introduction
@@ -994,8 +994,9 @@ enum mac80211_tx_info_flags {
  *	of their QoS TID or other priority field values.
  * @IEEE80211_TX_CTRL_MCAST_MLO_FIRST_TX: first MLO TX, used mostly internally
  *	for sequence number assignment
- * @IEEE80211_TX_CTRL_SCAN_TX: Indicates that this frame is transmitted
- *	due to scanning, not in normal operation on the interface.
+ * @IEEE80211_TX_CTRL_DONT_USE_RATE_MASK: Don't use rate mask for this frame
+ *	which is transmitted due to scanning or offchannel TX, not in normal
+ *	operation on the interface.
  * @IEEE80211_TX_CTRL_MLO_LINK: If not @IEEE80211_LINK_UNSPECIFIED, this
  *	frame should be transmitted on the specific link. This really is
  *	only relevant for frames that do not have data present, and is
@@ -1016,7 +1017,7 @@ enum mac80211_tx_control_flags {
 	IEEE80211_TX_CTRL_NO_SEQNO		= BIT(7),
 	IEEE80211_TX_CTRL_DONT_REORDER		= BIT(8),
 	IEEE80211_TX_CTRL_MCAST_MLO_FIRST_TX	= BIT(9),
-	IEEE80211_TX_CTRL_SCAN_TX		= BIT(10),
+	IEEE80211_TX_CTRL_DONT_USE_RATE_MASK	= BIT(10),
 	IEEE80211_TX_CTRL_MLO_LINK		= 0xf0000000,
 };
 
@@ -1447,8 +1448,6 @@ ieee80211_tx_info_clear_status(struct ieee80211_tx_info *info)
  * @RX_FLAG_AMPDU_IS_LAST: this subframe is the last subframe of the A-MPDU
  * @RX_FLAG_AMPDU_DELIM_CRC_ERROR: A delimiter CRC error has been detected
  *	on this subframe
- * @RX_FLAG_AMPDU_DELIM_CRC_KNOWN: The delimiter CRC field is known (the CRC
- *	is stored in the @ampdu_delimiter_crc field)
  * @RX_FLAG_MIC_STRIPPED: The mic was stripped of this packet. Decryption was
  *	done by the hardware
  * @RX_FLAG_ONLY_MONITOR: Report frame only to monitor interfaces without
@@ -1520,7 +1519,7 @@ enum mac80211_rx_flags {
 	RX_FLAG_AMPDU_LAST_KNOWN	= BIT(12),
 	RX_FLAG_AMPDU_IS_LAST		= BIT(13),
 	RX_FLAG_AMPDU_DELIM_CRC_ERROR	= BIT(14),
-	RX_FLAG_AMPDU_DELIM_CRC_KNOWN	= BIT(15),
+	/* one free bit at 15 */
 	RX_FLAG_MACTIME			= BIT(16) | BIT(17),
 	RX_FLAG_MACTIME_PLCP_START	= 1 << 16,
 	RX_FLAG_MACTIME_START		= 2 << 16,
@@ -1617,7 +1616,6 @@ enum mac80211_rx_encoding {
  * @rx_flags: internal RX flags for mac80211
  * @ampdu_reference: A-MPDU reference number, must be a different value for
  *	each A-MPDU but the same for each subframe within one A-MPDU
- * @ampdu_delimiter_crc: A-MPDU delimiter CRC
  * @zero_length_psdu_type: radiotap type of the 0-length PSDU
  * @link_valid: if the link which is identified by @link_id is valid. This flag
  *	is set only when connection is MLO.
@@ -1655,7 +1653,6 @@ struct ieee80211_rx_status {
 	s8 signal;
 	u8 chains;
 	s8 chain_signal[IEEE80211_MAX_CHAINS];
-	u8 ampdu_delimiter_crc;
 	u8 zero_length_psdu_type;
 	u8 link_valid:1, link_id:4;
 };
@@ -1975,6 +1972,8 @@ enum ieee80211_neg_ttlm_res {
  * @neg_ttlm: negotiated TID to link mapping info.
  *	see &struct ieee80211_neg_ttlm.
  * @addr: address of this interface
+ * @addr_valid: indicates if the address is actively used. Set to false for
+ *	passive monitor interfaces, true in all other cases.
  * @p2p: indicates whether this AP or STA interface is a p2p
  *	interface, i.e. a GO or p2p-sta respectively
  * @netdev_features: tx netdev features supported by the hardware for this
@@ -2014,6 +2013,7 @@ struct ieee80211_vif {
 	u16 valid_links, active_links, dormant_links, suspended_links;
 	struct ieee80211_neg_ttlm neg_ttlm;
 	u8 addr[ETH_ALEN] __aligned(2);
+	bool addr_valid;
 	bool p2p;
 
 	u8 cab_queue;
@@ -2487,7 +2487,7 @@ struct ieee80211_link_sta {
  * @spp_amsdu: indicates whether the STA uses SPP A-MSDU or not.
  */
 struct ieee80211_sta {
-	u8 addr[ETH_ALEN];
+	u8 addr[ETH_ALEN] __aligned(2);
 	u16 aid;
 	u16 max_rx_aggregation_subframes;
 	bool wme;
@@ -2682,6 +2682,11 @@ struct ieee80211_txq {
  *	a virtual monitor interface when monitor interfaces are the only
  *	active interfaces.
  *
+ * @IEEE80211_HW_NO_VIRTUAL_MONITOR: The driver would like to be informed
+ *	of any monitor interface, as well as their configured channel.
+ *	This is useful for supporting multiple monitor interfaces on different
+ *	channels.
+ *
  * @IEEE80211_HW_NO_AUTO_VIF: The driver would like for no wlanX to
  *	be created.  It is expected user-space will create vifs as
  *	desired (and thus have them named as desired).
@@ -2841,6 +2846,7 @@ enum ieee80211_hw_flags {
 	IEEE80211_HW_SUPPORTS_DYNAMIC_PS,
 	IEEE80211_HW_MFP_CAPABLE,
 	IEEE80211_HW_WANT_MONITOR_VIF,
+	IEEE80211_HW_NO_VIRTUAL_MONITOR,
 	IEEE80211_HW_NO_AUTO_VIF,
 	IEEE80211_HW_SW_CRYPTO_CONTROL,
 	IEEE80211_HW_SUPPORT_FAST_XMIT,
@@ -3179,6 +3185,19 @@ ieee80211_get_alt_retry_rate(const struct ieee80211_hw *hw,
  * to transmit happened and thus status cannot be reported.
  */
 void ieee80211_free_txskb(struct ieee80211_hw *hw, struct sk_buff *skb);
+
+/**
+ * ieee80211_purge_tx_queue - purge TX skb queue
+ * @hw: the hardware
+ * @skbs: the skbs
+ *
+ * Free a set of transmit skbs. Use this function when device is going to stop
+ * but some transmit skbs without TX status are still queued.
+ * This function does not take the list lock and the caller must hold the
+ * relevant locks to use it.
+ */
+void ieee80211_purge_tx_queue(struct ieee80211_hw *hw,
+			      struct sk_buff_head *skbs);
 
 /**
  * DOC: Hardware crypto acceleration
@@ -6242,6 +6261,24 @@ void ieee80211_iterate_stations_atomic(struct ieee80211_hw *hw,
 				       void (*iterator)(void *data,
 						struct ieee80211_sta *sta),
 				       void *data);
+
+/**
+ * ieee80211_iterate_stations_mtx - iterate stations
+ *
+ * This function iterates over all stations associated with a given
+ * hardware that are currently uploaded to the driver and calls the callback
+ * function for them. This version can only be used while holding the wiphy
+ * mutex.
+ *
+ * @hw: the hardware struct of which the interfaces should be iterated over
+ * @iterator: the iterator function to call
+ * @data: first argument of the iterator function
+ */
+void ieee80211_iterate_stations_mtx(struct ieee80211_hw *hw,
+				    void (*iterator)(void *data,
+						     struct ieee80211_sta *sta),
+				    void *data);
+
 /**
  * ieee80211_queue_work - add work onto the mac80211 workqueue
  *
@@ -6716,8 +6753,11 @@ void ieee80211_cqm_beacon_loss_notify(struct ieee80211_vif *vif, gfp_t gfp);
  * ieee80211_radar_detected - inform that a radar was detected
  *
  * @hw: pointer as obtained from ieee80211_alloc_hw()
+ * @chanctx_conf: Channel context on which radar is detected. Mandatory to
+ *	pass a valid pointer during MLO. For non-MLO %NULL can be passed
  */
-void ieee80211_radar_detected(struct ieee80211_hw *hw);
+void ieee80211_radar_detected(struct ieee80211_hw *hw,
+			      struct ieee80211_chanctx_conf *chanctx_conf);
 
 /**
  * ieee80211_chswitch_done - Complete channel switch process
@@ -6735,14 +6775,12 @@ void ieee80211_chswitch_done(struct ieee80211_vif *vif, bool success,
 /**
  * ieee80211_channel_switch_disconnect - disconnect due to channel switch error
  * @vif: &struct ieee80211_vif pointer from the add_interface callback.
- * @block_tx: if %true, do not send deauth frame.
  *
  * Instruct mac80211 to disconnect due to a channel switch error. The channel
  * switch can request to block the tx and so, we need to make sure we do not send
  * a deauth frame in this case.
  */
-void ieee80211_channel_switch_disconnect(struct ieee80211_vif *vif,
-					 bool block_tx);
+void ieee80211_channel_switch_disconnect(struct ieee80211_vif *vif);
 
 /**
  * ieee80211_request_smps - request SM PS transition

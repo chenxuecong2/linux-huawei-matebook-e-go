@@ -370,7 +370,6 @@ struct ath11k_vif {
 	struct ath11k *ar;
 	struct ieee80211_vif *vif;
 
-	u16 tx_seq_no;
 	struct wmi_wmm_params_all_arg wmm_params;
 	struct list_head list;
 	union {
@@ -399,6 +398,7 @@ struct ath11k_vif {
 	u8 bssid[ETH_ALEN];
 	struct cfg80211_bitrate_mask bitrate_mask;
 	struct delayed_work connection_loss_work;
+	struct work_struct bcn_tx_work;
 	int num_legacy_stations;
 	int rtscts_prot_mode;
 	int txpower;
@@ -406,11 +406,17 @@ struct ath11k_vif {
 	bool wpaie_present;
 	bool bcca_zero_sent;
 	bool do_not_send_tmpl;
-	struct ieee80211_chanctx_conf chanctx;
 	struct ath11k_arp_ns_offload arp_ns_offload;
 	struct ath11k_rekey_data rekey_data;
 
 	struct ath11k_reg_tpc_power_info reg_tpc_info;
+
+	/* Must be last - ends in a flexible-array member.
+	 *
+	 * FIXME: Driver should not copy struct ieee80211_chanctx_conf,
+	 * especially because it has a flexible array. Find a better way.
+	 */
+	struct ieee80211_chanctx_conf chanctx;
 };
 
 struct ath11k_vif_iter {
@@ -592,6 +598,8 @@ struct ath11k_fw_stats {
 	struct list_head pdevs;
 	struct list_head vdevs;
 	struct list_head bcn;
+	u32 num_vdev_recvd;
+	u32 num_bcn_recvd;
 };
 
 struct ath11k_dbg_htt_stats {
@@ -738,6 +746,10 @@ struct ath11k {
 	struct completion bss_survey_done;
 
 	struct work_struct regd_update_work;
+	struct work_struct channel_update_work;
+	struct list_head channel_update_queue;
+	/* protects channel_update_queue data */
+	spinlock_t channel_update_lock;
 
 	struct work_struct wmi_mgmt_tx_work;
 	struct sk_buff_head wmi_mgmt_tx_queue;

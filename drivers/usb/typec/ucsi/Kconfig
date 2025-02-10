@@ -78,13 +78,13 @@ config UCSI_LENOVO_YOGA_C630
 	  To compile the driver as a module, choose M here: the module will be
 	  called ucsi_yoga_c630.
 
-config UCSI_HUAWEI_MATEBOOK_E_GO
-	tristate "UCSI Interface Driver for Lenovo Yoga C630"
-	depends on EC_LENOVO_YOGA_C630
+config UCSI_HUAWEI_GAOKUN
+	tristate "UCSI Interface Driver for Huawei Matebook E Go (sc8280xp)"
+	depends on EC_HUAWEI_GAOKUN
 	help
-	  This driver enables UCSI support on the Lenovo Yoga C630 laptop.
+	  This driver enables UCSI support on the Huawei Matebook E Go tablet.
 
 	  To compile the driver as a module, choose M here: the module will be
-	  called ucsi_yoga_c630.	  
-
+	  called ucsi_huawei_gaokun.
+	  
 endif

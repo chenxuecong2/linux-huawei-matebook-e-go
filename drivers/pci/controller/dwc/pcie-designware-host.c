@@ -48,8 +48,9 @@ static struct irq_chip dw_pcie_msi_irq_chip = {
 };
 
 static struct msi_domain_info dw_pcie_msi_domain_info = {
-	.flags	= (MSI_FLAG_USE_DEF_DOM_OPS | MSI_FLAG_USE_DEF_CHIP_OPS |
-		   MSI_FLAG_PCI_MSIX | MSI_FLAG_MULTI_PCI_MSI),
+	.flags	= MSI_FLAG_USE_DEF_DOM_OPS | MSI_FLAG_USE_DEF_CHIP_OPS |
+		  MSI_FLAG_NO_AFFINITY | MSI_FLAG_PCI_MSIX |
+		  MSI_FLAG_MULTI_PCI_MSI,
 	.chip	= &dw_pcie_msi_irq_chip,
 };
 
@@ -116,12 +117,6 @@ static void dw_pci_setup_msi_msg(struct irq_data *d, struct msi_msg *msg)
 		(int)d->hwirq, msg->address_hi, msg->address_lo);
 }
 
-static int dw_pci_msi_set_affinity(struct irq_data *d,
-				   const struct cpumask *mask, bool force)
-{
-	return -EINVAL;
-}
-
 static void dw_pci_bottom_mask(struct irq_data *d)
 {
 	struct dw_pcie_rp *pp = irq_data_get_irq_chip_data(d);
@@ -177,7 +172,6 @@ static struct irq_chip dw_pci_msi_bottom_irq_chip = {
 	.name = "DWPCI-MSI",
 	.irq_ack = dw_pci_bottom_ack,
 	.irq_compose_msi_msg = dw_pci_setup_msi_msg,
-	.irq_set_affinity = dw_pci_msi_set_affinity,
 	.irq_mask = dw_pci_bottom_mask,
 	.irq_unmask = dw_pci_bottom_unmask,
 };
@@ -930,14 +924,15 @@ int dw_pcie_suspend_noirq(struct dw_pcie *pci)
 	 * If L1SS is supported, then do not put the link into L2 as some
 	 * devices such as NVMe expect low resume latency.
 	 */
-	if (dw_pcie_readw_dbi(pci, offset + PCI_EXP_LNKCTL) & PCI_EXP_LNKCTL_ASPM_L1)
+	if (!pci->disable_link_on_suspend &&
+	    dw_pcie_readw_dbi(pci, offset + PCI_EXP_LNKCTL) & PCI_EXP_LNKCTL_ASPM_L1)
 		return 0;
 
 	if (dw_pcie_get_ltssm(pci) <= DW_PCIE_LTSSM_DETECT_ACT)
 		return 0;
 
 	if (pci->pp.ops->pme_turn_off)
-		pci->pp.ops->pme_turn_off(&pci->pp);
+		ret = pci->pp.ops->pme_turn_off(&pci->pp);
 	else
 		ret = dw_pcie_pme_turn_off(pci);
 
@@ -981,13 +976,17 @@ int dw_pcie_resume_noirq(struct dw_pcie *pci)
 	dw_pcie_setup_rc(&pci->pp);
 
 	ret = dw_pcie_start_link(pci);
-	if (ret)
-		return ret;
+	if (ret) {
+		if (pci->pp.ops->deinit)
+			/* Attempt to leave the hw in some reasonable state */
+			pci->pp.ops->deinit(&pci->pp);
 
-	ret = dw_pcie_wait_for_link(pci);
-	if (ret)
 		return ret;
+	}
 
-	return ret;
+	/* Ignore the retval, the devices may come up later. */
+	dw_pcie_wait_for_link(pci);
+
+	return 0;
 }
 EXPORT_SYMBOL_GPL(dw_pcie_resume_noirq);

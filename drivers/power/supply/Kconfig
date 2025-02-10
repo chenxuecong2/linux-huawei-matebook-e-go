@@ -150,7 +150,7 @@ config BATTERY_DS2781
 
 	  The battery monitor chip is used in many batteries/devices
 	  as the one who is responsible for charging/discharging/monitoring
-	  Li+ batteries.
+	  Li batteries.
 
 	  If you are unsure, say N.
 
@@ -386,7 +386,7 @@ config BATTERY_MAX17040
 	depends on I2C && IIO
 	select REGMAP_I2C
 	help
-	  Driver supports Maxim fuel-gauge systems for lithium-ion (Li+)
+	  Driver supports Maxim fuel-gauge systems for lithium-ion (Li)
 	  batteries used mainly in handheld and portable equipment.
 	  Supported devices: max17040, max17041, max17043, max17044, max17048,
 	  max17049, max17058, max17059, max77836.
@@ -401,7 +401,7 @@ config BATTERY_MAX17042
 	depends on I2C
 	select REGMAP_I2C
 	help
-	  MAX17042 is fuel-gauge systems for lithium-ion (Li+) batteries
+	  MAX17042 is fuel-gauge systems for lithium-ion (Li) batteries
 	  in handheld and portable equipment. The MAX17042 is configured
 	  to operate with a single lithium cell. MAX8997 and MAX8966 are
 	  multi-function devices that include fuel gauages that are compatible
@@ -416,7 +416,7 @@ config BATTERY_MAX1720X
 	depends on I2C
 	select REGMAP_I2C
 	help
-	  MAX1720x is a family of fuel-gauge systems for lithium-ion (Li+)
+	  MAX1720x is a family of fuel-gauge systems for lithium-ion (Li)
 	  batteries in handheld and portable equipment. MAX17201 are
 	  configured to operate with a single lithium cell, the MAX17205
 	  can operate with multiple cells.
@@ -428,13 +428,22 @@ config BATTERY_MAX1721X
 	depends on W1
 	select REGMAP_W1
 	help
-	  MAX1721x is fuel-gauge systems for lithium-ion (Li+) batteries
+	  MAX1721x is fuel-gauge systems for lithium-ion (Li) batteries
 	  in handheld and portable equipment. MAX17211 used with single cell
 	  battery. MAX17215 designed for muticell battery. Both them have
 	  OneWire (W1) host interface.
 
 	  Say Y here to enable support for the MAX17211/MAX17215 standalone
 	  battery gas-gauge.
+
+config BATTERY_HUAWEI_GAOKUN
+	tristate "Huawei Matebook E Go (sc8280xp) battery"
+	depends on EC_HUAWEI_GAOKUN
+	help
+	  This driver enables battery support on the Huawei Matebook E Go.
+
+	  To compile the driver as a module, choose M here: the module will be
+	  called huawei-gaokun-battery.
 
 config BATTERY_TWL4030_MADC
 	tristate "TWL4030 MADC battery driver"
@@ -578,7 +587,7 @@ config CHARGER_MAX77976
 	depends on I2C
 	select REGMAP_I2C
 	help
-	  The Maxim MAX77976 is a 19 Vin, 5.5A 1-Cell Li+ Battery Charger
+	  The Maxim MAX77976 is a 19 Vin, 5.5A 1-Cell Li Battery Charger
 	  USB OTG support. It has an I2C interface for configuration.
 
 	  Say Y to enable support for the Maxim MAX77976 battery charger.
@@ -840,7 +849,7 @@ config CHARGER_RT9467
 	  power MOSFETs, input current sensing and regulation, high-accuracy
 	  voltage regulation, and charge termination. The charge current is
 	  regulated through integrated sensing resistors. It also features
-	  USB On-The-Go (OTG) support and integrates D+/D- pin for USB
+	  USB On-The-Go (OTG) support and integrates D/D- pin for USB
 	  host/charging port detection.
 
 	  This driver can also be built as a module. If so, the module
@@ -998,22 +1007,6 @@ config BATTERY_UG3105
 	  Since Linux does not monitor coulomb-counter changes while the
 	  device is off or suspended, the functionality of this driver is
 	  limited to reporting capacity only.
-
-config GAOKUN_BATTERY
-	tristate "uPI uG3105 battery monitor driver"
-	depends on I2C
-	help
-	  Battery monitor driver for the uPI uG3105 battery monitor.
-
-	  Note the uG3105 is not a full-featured autonomous fuel-gauge. Instead
-	  it is expected to be use in combination with some always on
-	  microcontroller reading its coulomb-counter before it can wrap
-	  (it must be read every 400 seconds!).
-
-	  Since Linux does not monitor coulomb-counter changes while the
-	  device is off or suspended, the functionality of this driver is
-	  limited to reporting capacity only.
-
 
 config CHARGER_QCOM_SMB2
 	tristate "Qualcomm PMI8998 PMIC charger driver"

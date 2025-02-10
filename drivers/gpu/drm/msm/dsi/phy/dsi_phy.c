@@ -583,15 +583,15 @@ static const struct of_device_id dsi_phy_dt_match[] = {
 	  .data = &dsi_phy_7nm_7280_cfgs },
 	{ .compatible = "qcom,sm6375-dsi-phy-7nm",	/* dpu 6.9 */
 	  .data = &dsi_phy_7nm_6375_cfgs },
-	{ .compatible = "qcom,sm8350-dsi-phy-5nm",	/* dpu 7.0 */
+	{ .compatible = "qcom,sm8350-dsi-phy-5nm",	/* dpu 7.0, dsi 2.5.0 */
 	  .data = &dsi_phy_5nm_8350_cfgs },
-	{ .compatible = "qcom,sc8280xp-dsi-phy-5nm",/* dpu 8.0 */
+	{ .compatible = "qcom,sc8280xp-dsi-phy-5nm",	/* dpu 8.0, dsi 2.5.1 */
 	  .data = &dsi_phy_5nm_8280_cfgs },
-	{ .compatible = "qcom,sm8450-dsi-phy-5nm",	/* dpu 8.1 */
+	{ .compatible = "qcom,sm8450-dsi-phy-5nm",	/* dpu 8.1, dsi 2.6.0 */
 	  .data = &dsi_phy_5nm_8450_cfgs },
-	{ .compatible = "qcom,sm8550-dsi-phy-4nm",	/* dpu 9.0 */
+	{ .compatible = "qcom,sm8550-dsi-phy-4nm",	/* dpu 9.0, dsi 2.7.0 */
 	  .data = &dsi_phy_4nm_8550_cfgs },
-	{ .compatible = "qcom,sm8650-dsi-phy-4nm",	/* dpu 10.0 */
+	{ .compatible = "qcom,sm8650-dsi-phy-4nm",	/* dpu 10.0, dsi 2.8.0 */
 	  .data = &dsi_phy_4nm_8650_cfgs },
 #endif
 	{}

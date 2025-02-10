@@ -368,15 +368,16 @@ struct receive_queue {
  * because table sizes may be differ according to the device configuration.
  */
 #define VIRTIO_NET_RSS_MAX_KEY_SIZE     40
-#define VIRTIO_NET_RSS_MAX_TABLE_LEN    128
 struct virtio_net_ctrl_rss {
 	u32 hash_types;
 	u16 indirection_table_mask;
 	u16 unclassified_queue;
-	u16 indirection_table[VIRTIO_NET_RSS_MAX_TABLE_LEN];
+	u16 hash_cfg_reserved; /* for HASH_CONFIG (see virtio_net_hash_config for details) */
 	u16 max_tx_vq;
 	u8 hash_key_length;
 	u8 key[VIRTIO_NET_RSS_MAX_KEY_SIZE];
+
+	u16 *indirection_table;
 };
 
 /* Control VQ buffers: protected by the rtnl lock */
@@ -501,6 +502,7 @@ struct virtio_net_common_hdr {
 };
 
 static void virtnet_sq_free_unused_buf(struct virtqueue *vq, void *buf);
+static void virtnet_sq_free_unused_buf_done(struct virtqueue *vq);
 static int virtnet_xdp_handler(struct bpf_prog *xdp_prog, struct xdp_buff *xdp,
 			       struct net_device *dev,
 			       unsigned int *xdp_xmit,
@@ -511,6 +513,25 @@ static struct sk_buff *virtnet_skb_append_frag(struct sk_buff *head_skb,
 					       struct sk_buff *curr_skb,
 					       struct page *page, void *buf,
 					       int len, int truesize);
+
+static int rss_indirection_table_alloc(struct virtio_net_ctrl_rss *rss, u16 indir_table_size)
+{
+	if (!indir_table_size) {
+		rss->indirection_table = NULL;
+		return 0;
+	}
+
+	rss->indirection_table = kmalloc_array(indir_table_size, sizeof(u16), GFP_KERNEL);
+	if (!rss->indirection_table)
+		return -ENOMEM;
+
+	return 0;
+}
+
+static void rss_indirection_table_free(struct virtio_net_ctrl_rss *rss)
+{
+	kfree(rss->indirection_table);
+}
 
 static bool is_xdp_frame(void *ptr)
 {
@@ -925,9 +946,6 @@ static void *virtnet_rq_alloc(struct receive_queue *rq, u32 size, gfp_t gfp)
 	struct virtnet_rq_dma *dma;
 	void *buf, *head;
 	dma_addr_t addr;
-
-	if (unlikely(!skb_page_frag_refill(size, alloc_frag, gfp)))
-		return NULL;
 
 	head = page_address(alloc_frag->page);
 
@@ -1807,6 +1825,11 @@ static struct sk_buff *receive_small(struct net_device *dev,
 	struct page *page = virt_to_head_page(buf);
 	struct sk_buff *skb;
 
+	/* We passed the address of virtnet header to virtio-core,
+	 * so truncate the padding.
+	 */
+	buf -= VIRTNET_RX_PAD + xdp_headroom;
+
 	len -= vi->hdr_len;
 	u64_stats_add(&stats->bytes, len);
 
@@ -2418,12 +2441,16 @@ static int add_recvbuf_small(struct virtnet_info *vi, struct receive_queue *rq,
 	len = SKB_DATA_ALIGN(len) +
 	      SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 
+	if (unlikely(!skb_page_frag_refill(len, &rq->alloc_frag, gfp)))
+		return -ENOMEM;
+
 	buf = virtnet_rq_alloc(rq, len, gfp);
 	if (unlikely(!buf))
 		return -ENOMEM;
 
-	virtnet_rq_init_one_sg(rq, buf + VIRTNET_RX_PAD + xdp_headroom,
-			       vi->hdr_len + GOOD_PACKET_LEN);
+	buf += VIRTNET_RX_PAD + xdp_headroom;
+
+	virtnet_rq_init_one_sg(rq, buf, vi->hdr_len + GOOD_PACKET_LEN);
 
 	err = virtqueue_add_inbuf_ctx(rq->vq, rq->sg, 1, buf, ctx, gfp);
 	if (err < 0) {
@@ -2518,6 +2545,12 @@ static int add_recvbuf_mergeable(struct virtnet_info *vi,
 	 * disabled GSO for XDP, it won't be a big issue.
 	 */
 	len = get_mergeable_buf_len(rq, &rq->mrg_avg_pkt_len, room);
+
+	if (unlikely(!skb_page_frag_refill(len + room, alloc_frag, gfp)))
+		return -ENOMEM;
+
+	if (!alloc_frag->offset && len + room + sizeof(struct virtnet_rq_dma) > alloc_frag->size)
+		len -= sizeof(struct virtnet_rq_dma);
 
 	buf = virtnet_rq_alloc(rq, len + room, gfp);
 	if (unlikely(!buf))
@@ -2866,7 +2899,6 @@ static int virtnet_enable_queue_pair(struct virtnet_info *vi, int qp_index)
 	if (err < 0)
 		goto err_xdp_reg_mem_model;
 
-	netdev_tx_reset_queue(netdev_get_tx_queue(vi->dev, qp_index));
 	virtnet_napi_enable(vi->rq[qp_index].vq, &vi->rq[qp_index].napi);
 	virtnet_napi_tx_enable(vi, vi->sq[qp_index].vq, &vi->sq[qp_index].napi);
 
@@ -2882,6 +2914,25 @@ static void virtnet_cancel_dim(struct virtnet_info *vi, struct dim *dim)
 	if (!virtio_has_feature(vi->vdev, VIRTIO_NET_F_VQ_NOTF_COAL))
 		return;
 	net_dim_work_cancel(dim);
+}
+
+static void virtnet_update_settings(struct virtnet_info *vi)
+{
+	u32 speed;
+	u8 duplex;
+
+	if (!virtio_has_feature(vi->vdev, VIRTIO_NET_F_SPEED_DUPLEX))
+		return;
+
+	virtio_cread_le(vi->vdev, struct virtio_net_config, speed, &speed);
+
+	if (ethtool_validate_speed(speed))
+		vi->speed = speed;
+
+	virtio_cread_le(vi->vdev, struct virtio_net_config, duplex, &duplex);
+
+	if (ethtool_validate_duplex(duplex))
+		vi->duplex = duplex;
 }
 
 static int virtnet_open(struct net_device *dev)
@@ -2900,6 +2951,15 @@ static int virtnet_open(struct net_device *dev)
 		err = virtnet_enable_queue_pair(vi, i);
 		if (err < 0)
 			goto err_enable_qp;
+	}
+
+	if (virtio_has_feature(vi->vdev, VIRTIO_NET_F_STATUS)) {
+		if (vi->status & VIRTIO_NET_S_LINK_UP)
+			netif_carrier_on(vi->dev);
+		virtio_config_driver_enable(vi->vdev);
+	} else {
+		vi->status = VIRTIO_NET_S_LINK_UP;
+		netif_carrier_on(dev);
 	}
 
 	return 0;
@@ -3106,7 +3166,7 @@ static int virtnet_rx_resize(struct virtnet_info *vi,
 
 	virtnet_rx_pause(vi, rq);
 
-	err = virtqueue_resize(rq->vq, ring_num, virtnet_rq_unmap_free_buf);
+	err = virtqueue_resize(rq->vq, ring_num, virtnet_rq_unmap_free_buf, NULL);
 	if (err)
 		netdev_err(vi->dev, "resize rx fail: rx queue index: %d err: %d\n", qindex, err);
 
@@ -3169,7 +3229,8 @@ static int virtnet_tx_resize(struct virtnet_info *vi, struct send_queue *sq,
 
 	virtnet_tx_pause(vi, sq);
 
-	err = virtqueue_resize(sq->vq, ring_num, virtnet_sq_free_unused_buf);
+	err = virtqueue_resize(sq->vq, ring_num, virtnet_sq_free_unused_buf,
+			       virtnet_sq_free_unused_buf_done);
 	if (err)
 		netdev_err(vi->dev, "resize tx fail: tx queue index: %d err: %d\n", qindex, err);
 
@@ -3340,14 +3401,58 @@ static void virtnet_ack_link_announce(struct virtnet_info *vi)
 		dev_warn(&vi->dev->dev, "Failed to ack link announce.\n");
 }
 
+static bool virtnet_commit_rss_command(struct virtnet_info *vi);
+
+static void virtnet_rss_update_by_qpairs(struct virtnet_info *vi, u16 queue_pairs)
+{
+	u32 indir_val = 0;
+	int i = 0;
+
+	for (; i < vi->rss_indir_table_size; ++i) {
+		indir_val = ethtool_rxfh_indir_default(i, queue_pairs);
+		vi->rss.indirection_table[i] = indir_val;
+	}
+	vi->rss.max_tx_vq = queue_pairs;
+}
+
 static int virtnet_set_queues(struct virtnet_info *vi, u16 queue_pairs)
 {
 	struct virtio_net_ctrl_mq *mq __free(kfree) = NULL;
-	struct scatterlist sg;
+	struct virtio_net_ctrl_rss old_rss;
 	struct net_device *dev = vi->dev;
+	struct scatterlist sg;
 
 	if (!vi->has_cvq || !virtio_has_feature(vi->vdev, VIRTIO_NET_F_MQ))
 		return 0;
+
+	/* Firstly check if we need update rss. Do updating if both (1) rss enabled and
+	 * (2) no user configuration.
+	 *
+	 * During rss command processing, device updates queue_pairs using rss.max_tx_vq. That is,
+	 * the device updates queue_pairs together with rss, so we can skip the sperate queue_pairs
+	 * update (VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET below) and return directly.
+	 */
+	if (vi->has_rss && !netif_is_rxfh_configured(dev)) {
+		memcpy(&old_rss, &vi->rss, sizeof(old_rss));
+		if (rss_indirection_table_alloc(&vi->rss, vi->rss_indir_table_size)) {
+			vi->rss.indirection_table = old_rss.indirection_table;
+			return -ENOMEM;
+		}
+
+		virtnet_rss_update_by_qpairs(vi, queue_pairs);
+
+		if (!virtnet_commit_rss_command(vi)) {
+			/* restore ctrl_rss if commit_rss_command failed */
+			rss_indirection_table_free(&vi->rss);
+			memcpy(&vi->rss, &old_rss, sizeof(old_rss));
+
+			dev_warn(&dev->dev, "Fail to set num of queue pairs to %d, because committing RSS failed\n",
+				 queue_pairs);
+			return -EINVAL;
+		}
+		rss_indirection_table_free(&old_rss);
+		goto succ;
+	}
 
 	mq = kzalloc(sizeof(*mq), GFP_KERNEL);
 	if (!mq)
@@ -3361,12 +3466,12 @@ static int virtnet_set_queues(struct virtnet_info *vi, u16 queue_pairs)
 		dev_warn(&dev->dev, "Fail to set num of queue pairs to %d\n",
 			 queue_pairs);
 		return -EINVAL;
-	} else {
-		vi->curr_queue_pairs = queue_pairs;
-		/* virtnet_open() will refill when device is going to up. */
-		if (dev->flags & IFF_UP)
-			schedule_delayed_work(&vi->refill, 0);
 	}
+succ:
+	vi->curr_queue_pairs = queue_pairs;
+	/* virtnet_open() will refill when device is going to up. */
+	if (dev->flags & IFF_UP)
+		schedule_delayed_work(&vi->refill, 0);
 
 	return 0;
 }
@@ -3380,11 +3485,21 @@ static int virtnet_close(struct net_device *dev)
 	disable_delayed_refill(vi);
 	/* Make sure refill_work doesn't re-enable napi! */
 	cancel_delayed_work_sync(&vi->refill);
+	/* Prevent the config change callback from changing carrier
+	 * after close
+	 */
+	virtio_config_driver_disable(vi->vdev);
+	/* Stop getting status/speed updates: we don't care until next
+	 * open
+	 */
+	cancel_work_sync(&vi->config_work);
 
 	for (i = 0; i < vi->max_queue_pairs; i++) {
 		virtnet_disable_queue_pair(vi, i);
 		virtnet_cancel_dim(vi, &vi->rq[i].dim);
 	}
+
+	netif_carrier_off(dev);
 
 	return 0;
 }
@@ -3784,11 +3899,15 @@ static bool virtnet_commit_rss_command(struct virtnet_info *vi)
 	/* prepare sgs */
 	sg_init_table(sgs, 4);
 
-	sg_buf_size = offsetof(struct virtio_net_ctrl_rss, indirection_table);
+	sg_buf_size = offsetof(struct virtio_net_ctrl_rss, hash_cfg_reserved);
 	sg_set_buf(&sgs[0], &vi->rss, sg_buf_size);
 
-	sg_buf_size = sizeof(uint16_t) * (vi->rss.indirection_table_mask + 1);
-	sg_set_buf(&sgs[1], vi->rss.indirection_table, sg_buf_size);
+	if (vi->has_rss) {
+		sg_buf_size = sizeof(uint16_t) * vi->rss_indir_table_size;
+		sg_set_buf(&sgs[1], vi->rss.indirection_table, sg_buf_size);
+	} else {
+		sg_set_buf(&sgs[1], &vi->rss.hash_cfg_reserved, sizeof(uint16_t));
+	}
 
 	sg_buf_size = offsetof(struct virtio_net_ctrl_rss, key)
 			- offsetof(struct virtio_net_ctrl_rss, max_tx_vq);
@@ -3812,21 +3931,14 @@ err:
 
 static void virtnet_init_default_rss(struct virtnet_info *vi)
 {
-	u32 indir_val = 0;
-	int i = 0;
-
 	vi->rss.hash_types = vi->rss_hash_types_supported;
 	vi->rss_hash_types_saved = vi->rss_hash_types_supported;
 	vi->rss.indirection_table_mask = vi->rss_indir_table_size
 						? vi->rss_indir_table_size - 1 : 0;
 	vi->rss.unclassified_queue = 0;
 
-	for (; i < vi->rss_indir_table_size; ++i) {
-		indir_val = ethtool_rxfh_indir_default(i, vi->curr_queue_pairs);
-		vi->rss.indirection_table[i] = indir_val;
-	}
+	virtnet_rss_update_by_qpairs(vi, vi->curr_queue_pairs);
 
-	vi->rss.max_tx_vq = vi->has_rss ? vi->curr_queue_pairs : 0;
 	vi->rss.hash_key_length = vi->rss_key_size;
 
 	netdev_rss_key_fill(vi->rss.key, vi->rss_key_size);
@@ -4111,7 +4223,7 @@ struct virtnet_stats_ctx {
 	u32 desc_num[3];
 
 	/* The actual supported stat types. */
-	u32 bitmap[3];
+	u64 bitmap[3];
 
 	/* Used to calculate the reply buffer size. */
 	u32 size[3];
@@ -5094,25 +5206,6 @@ static void virtnet_init_settings(struct net_device *dev)
 	vi->duplex = DUPLEX_UNKNOWN;
 }
 
-static void virtnet_update_settings(struct virtnet_info *vi)
-{
-	u32 speed;
-	u8 duplex;
-
-	if (!virtio_has_feature(vi->vdev, VIRTIO_NET_F_SPEED_DUPLEX))
-		return;
-
-	virtio_cread_le(vi->vdev, struct virtio_net_config, speed, &speed);
-
-	if (ethtool_validate_speed(speed))
-		vi->speed = speed;
-
-	virtio_cread_le(vi->vdev, struct virtio_net_config, duplex, &duplex);
-
-	if (ethtool_validate_duplex(duplex))
-		vi->duplex = duplex;
-}
-
 static u32 virtnet_get_rxfh_key_size(struct net_device *dev)
 {
 	return ((struct virtnet_info *)netdev_priv(dev))->rss_key_size;
@@ -5905,6 +5998,14 @@ static void virtnet_sq_free_unused_buf(struct virtqueue *vq, void *buf)
 		xdp_return_frame(ptr_to_xdp(buf));
 }
 
+static void virtnet_sq_free_unused_buf_done(struct virtqueue *vq)
+{
+	struct virtnet_info *vi = vq->vdev->priv;
+	int i = vq2txq(vq);
+
+	netdev_tx_reset_queue(netdev_get_tx_queue(vi->dev, i));
+}
+
 static void free_unused_bufs(struct virtnet_info *vi)
 {
 	void *buf;
@@ -6395,10 +6496,19 @@ static int virtnet_probe(struct virtio_device *vdev)
 			virtio_cread16(vdev, offsetof(struct virtio_net_config,
 				rss_max_indirection_table_length));
 	}
+	err = rss_indirection_table_alloc(&vi->rss, vi->rss_indir_table_size);
+	if (err)
+		goto free;
 
 	if (vi->has_rss || vi->has_rss_hash_report) {
 		vi->rss_key_size =
 			virtio_cread8(vdev, offsetof(struct virtio_net_config, rss_max_key_size));
+		if (vi->rss_key_size > VIRTIO_NET_RSS_MAX_KEY_SIZE) {
+			dev_err(&vdev->dev, "rss_max_key_size=%u exceeds the limit %u.\n",
+				vi->rss_key_size, VIRTIO_NET_RSS_MAX_KEY_SIZE);
+			err = -EINVAL;
+			goto free;
+		}
 
 		vi->rss_hash_types_supported =
 		    virtio_cread32(vdev, offsetof(struct virtio_net_config, supported_hash_types));
@@ -6521,7 +6631,19 @@ static int virtnet_probe(struct virtio_device *vdev)
 		goto free_failover;
 	}
 
+	/* Disable config change notification until ndo_open. */
+	virtio_config_driver_disable(vi->vdev);
+
 	virtio_device_ready(vdev);
+
+	if (vi->has_rss || vi->has_rss_hash_report) {
+		if (!virtnet_commit_rss_command(vi)) {
+			dev_warn(&vdev->dev, "RSS disabled because committing failed.\n");
+			dev->hw_features &= ~NETIF_F_RXHASH;
+			vi->has_rss_hash_report = false;
+			vi->has_rss = false;
+		}
+	}
 
 	virtnet_set_queues(vi, vi->curr_queue_pairs);
 
@@ -6570,19 +6692,11 @@ static int virtnet_probe(struct virtio_device *vdev)
 		vi->device_stats_cap = le64_to_cpu(v);
 	}
 
-	rtnl_unlock();
-
-	err = virtnet_cpu_notif_add(vi);
-	if (err) {
-		pr_debug("virtio_net: registering cpu notifier failed\n");
-		goto free_unregister_netdev;
-	}
-
 	/* Assume link up if device can't report link status,
 	   otherwise get link status from config. */
 	netif_carrier_off(dev);
 	if (virtio_has_feature(vi->vdev, VIRTIO_NET_F_STATUS)) {
-		schedule_work(&vi->config_work);
+		virtnet_config_changed_work(&vi->config_work);
 	} else {
 		vi->status = VIRTIO_NET_S_LINK_UP;
 		virtnet_update_settings(vi);
@@ -6593,6 +6707,14 @@ static int virtnet_probe(struct virtio_device *vdev)
 		if (virtio_has_feature(vi->vdev, guest_offloads[i]))
 			set_bit(guest_offloads[i], &vi->guest_offloads);
 	vi->guest_offloads_capable = vi->guest_offloads;
+
+	rtnl_unlock();
+
+	err = virtnet_cpu_notif_add(vi);
+	if (err) {
+		pr_debug("virtio_net: registering cpu notifier failed\n");
+		goto free_unregister_netdev;
+	}
 
 	pr_debug("virtnet: registered device %s with %d RX and TX vq's\n",
 		 dev->name, max_queue_pairs);
@@ -6615,10 +6737,19 @@ free:
 
 static void remove_vq_common(struct virtnet_info *vi)
 {
+	int i;
+
 	virtio_reset_device(vi->vdev);
 
 	/* Free unused buffers in both send and recv, if any. */
 	free_unused_bufs(vi);
+
+	/*
+	 * Rule of thumb is netdev_tx_reset_queue() should follow any
+	 * skb freeing not followed by netdev_tx_completed_queue()
+	 */
+	for (i = 0; i < vi->max_queue_pairs; i++)
+		netdev_tx_reset_queue(netdev_get_tx_queue(vi->dev, i));
 
 	free_receive_bufs(vi);
 
@@ -6645,6 +6776,8 @@ static void virtnet_remove(struct virtio_device *vdev)
 	net_failover_destroy(vi->failover);
 
 	remove_vq_common(vi);
+
+	rss_indirection_table_free(&vi->rss);
 
 	free_netdev(vi->dev);
 }
